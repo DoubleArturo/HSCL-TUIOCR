@@ -1,0 +1,7 @@
+{
+  "name": "Taiwan Invoice OCR Audit Pro",
+  "description": "Professional tool for digitizing handwritten Taiwanese 3-part Uniform Invoices with AI-driven accounting validation.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
