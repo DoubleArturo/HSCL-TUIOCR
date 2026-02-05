@@ -1,6 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Upload, Loader2, AlertCircle, CheckCircle2, Edit3, Trash2, FileSearch, Key, PlusSquare, FileDown, Clock, FileText, FileSpreadsheet, ArrowLeftRight, AlertTriangle, ArrowRight, UploadCloud, FolderOpen, ChevronRight, LogOut, Calendar } from 'lucide-react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { analyzeInvoice } from './services/geminiService';
 import { InvoiceData, AppStatus, InvoiceEntry, Project, ERPRecord, ProjectMeta, ProcessingState } from './types';
 import InvoiceEditor from './components/InvoiceEditor';
@@ -1053,6 +1054,7 @@ const App: React.FC = () => {
         .btn-indigo { @apply bg-indigo-600 text-white hover:bg-indigo-700 border border-transparent; }
       `}</style>
             {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} onSave={handleSave} onClose={() => setSelectedKey(null)} />}
+            <SpeedInsights />
         </div >
     );
 };
