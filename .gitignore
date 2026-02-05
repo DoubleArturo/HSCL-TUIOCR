@@ -19,3 +19,7 @@ dist/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Invoices
+2025.12 TUI
+System Debug Log
