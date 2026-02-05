@@ -16,6 +16,22 @@ export interface FieldConfidence {
   amount_total: number;
 }
 
+
+export interface UsageMetadata {
+  promptTokenCount: number;
+  candidatesTokenCount: number;
+  totalTokenCount: number;
+  cost_usd?: number; // Calculated cost
+}
+
+export enum VerificationCode {
+  SUCCESS = "SUCCESS",
+  BLURRY = "BLURRY",
+  NOT_INVOICE = "NOT_INVOICE",
+  PARTIAL = "PARTIAL",
+  UNKNOWN = "UNKNOWN"
+}
+
 export interface InvoiceData {
   invoice_number: string | null;
   invoice_date: string | null;
@@ -28,6 +44,10 @@ export interface InvoiceData {
   has_stamp: boolean;
   verification: VerificationData;
   field_confidence: FieldConfidence;
+  usage_metadata?: UsageMetadata; // New: Cost tracking
+  error_code?: VerificationCode; // New: Error handling
+  raw_response?: string; // New: Full AI JSON response text
+  trace_logs?: string[]; // New: Step-by-step processing log
 }
 
 export interface InvoiceEntry {
@@ -35,7 +55,7 @@ export interface InvoiceEntry {
   file: File;
   previewUrl: string;
   status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'ERROR';
-  data: InvoiceData[]; 
+  data: InvoiceData[];
   error?: string;
 }
 
@@ -54,7 +74,8 @@ export interface ERPRecord {
 export enum AppStatus {
   IDLE = 'IDLE',
   PROCESSING = 'PROCESSING',
-  VIEWING_LIST = 'VIEWING_LIST'
+  VIEWING_LIST = 'VIEWING_LIST',
+  ERROR_REVIEW = 'ERROR_REVIEW'
 }
 
 export interface ProjectMeta {
@@ -69,7 +90,12 @@ export interface Project {
   id: string;
   name: string;
   invoices: InvoiceEntry[];
-  erpData: ERPRecord[]; 
+  erpData: ERPRecord[];
   createdAt: string;
   updatedAt: string;
+}
+export interface ProcessingState {
+  current: number;
+  total: number;
+  status: 'IDLE' | 'PROCESSING' | 'COMPLETED';
 }

@@ -1,0 +1,1 @@
+{"root":["./app.tsx","./index.tsx","./types.ts","./vite-env.d.ts","./vite.config.ts","./components/costdashboard.tsx","./components/invoiceeditor.tsx","./components/invoiceresult.tsx","./services/geminiservice.ts","./services/googlesheetservice.ts"],"version":"5.8.3"}
