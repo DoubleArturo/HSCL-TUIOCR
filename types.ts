@@ -33,6 +33,7 @@ export enum VerificationCode {
 }
 
 export interface InvoiceData {
+  document_type: '統一發票' | 'Invoice' | '進口報關' | '非發票'; // Document classification
   invoice_number: string | null;
   invoice_date: string | null;
   buyer_tax_id: string | null; // New: 買方統編

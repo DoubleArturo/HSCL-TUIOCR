@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
 import { InvoiceData } from "../types";
+import { validateTaxIdWithVision } from './visionService';
 
 // Define process for Vite environment to avoid TS errors
 declare const process: {
@@ -11,13 +12,72 @@ declare const process: {
 };
 
 const SYSTEM_INSTRUCTION = `
-Confidence Scoring:
-- For EACH field extracted, assign a confidence score (0-100).
+You are an expert OCR system for Taiwanese Unified Invoices (GUI) and related business documents.
+Your goal is to extract structured data from document images with 100% precision.
+
+### 0. Document Type Classification (CRITICAL - First Step)
+Before extracting any data, classify the document type:
+
+**Priority Order** (if multiple types detected):
+1. **"Invoice"** - If the document contains the word "INVOICE" (English)
+2. **"進口報關"** - If the document contains "進口報單" or "海關" text
+3. **"統一發票"** - Standard Taiwan GUI (2 Letters + 8 Digits invoice number format)
+4. **"非發票"** - Anything else (e.g., Packing List, Receipt, Purchase Order)
+
+**Rules**:
+- If both "Invoice" and "進口報關" appear → Output "Invoice"
+- If only "進口報關" appears → Output "進口報關"
+- If standard Taiwan GUI format → Output "統一發票"
+- If none of above → Output "非發票"
+
+### 1. Unified Business No. (Unifying/Buyer Tax ID) Priority
+- **CRITICAL**: The Buyer Tax ID (買方統編) is widely expected to be **"16547744"**.
+- If the handwritten or printed text looks remotely like "16547744" (e.g., "16547744", "I6547744", "16541744"), **OUTPUT "16547744"**.
+- Priority: If there is ambiguity, prefer "16547744" over other interpretations.
+
+### 2. Field Extraction Rules
+- **Invoice Number**: Must be 2 English Letters + 8 Digits (e.g., AB-12345678). Remove strict spaces.
+- **Date**: Normalize to YYYY-MM-DD. Handle ROC years (e.g., 113/05/01 -> 2024-05-01).
+- **Tax IDs**: Must be 8 digits.
+- **Orientation**: Auto-detect rotation. Identify the main invoice if multiple are present (e.g. A3 scan).
+
+### 3. Output Format
+Return ONLY valid JSON matching the schema.
+Confidence Scoring: For EACH field, assign a score (0-100).
 `;
+
+// Helper: Levenshtein Distance for Fuzzy Matching
+const levenshteinDistance = (a: string, b: string): number => {
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) { matrix[i] = [i]; }
+  for (let j = 0; j <= a.length; j++) { matrix[0][j] = j; }
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) == a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          Math.min(
+            matrix[i][j - 1] + 1,   // insertion
+            matrix[i - 1][j] + 1    // deletion
+          )
+        );
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+};
 
 const invoiceObjectSchema = {
   type: Type.OBJECT,
   properties: {
+    document_type: {
+      type: Type.STRING,
+      enum: ["統一發票", "Invoice", "進口報關", "非發票"],
+      description: "Document classification. Priority: Invoice > 進口報關 > 統一發票 > 非發票"
+    },
     error_code: { type: Type.STRING, enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
     invoice_number: { type: Type.STRING },
     invoice_date: { type: Type.STRING },
@@ -147,7 +207,7 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     const MERGED_SELLERS = { ...STATIC_SELLERS, ...knownSellers };
 
     // Post-processing to enforce business rules
-    results = results.map(item => {
+    const processedResults = await Promise.all(results.map(async (item) => {
       const logs: string[] = [`[${new Date().toISOString()}] Started processing`, `Model: ${modelName}`];
 
       // Inject usage data into each item (redundant but useful for item-level tracking)
@@ -172,13 +232,82 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
         }
       }
 
-      // B. Buyer Tax ID Validation (Fixed Requirement)
+      // B. Buyer Tax ID Validation & Fuzzy Auto-Correction
       const EXPECTED_BUYER_ID = "16547744";
+      let needsVisionValidation = false;
+      let fuzzyMatchApplied = false;
+
       if (item.buyer_tax_id) {
-        const cleanBuyerId = item.buyer_tax_id.replace(/\D/g, '');
-        if (cleanBuyerId !== EXPECTED_BUYER_ID) {
-          item.verification.flagged_fields.push('buyer_tax_id');
-          logs.push(`Validation Fail: Buyer ID is ${cleanBuyerId}, expected ${EXPECTED_BUYER_ID}`);
+        let cleanBuyerId = item.buyer_tax_id.replace(/\D/g, '');
+
+        // Exact Match
+        if (cleanBuyerId === EXPECTED_BUYER_ID) {
+          // Good, nothing to do
+        } else {
+          // Fuzzy Match: Check Levenshtein Distance
+          const dist = levenshteinDistance(cleanBuyerId, EXPECTED_BUYER_ID);
+          // If distance is small (<= 3) and length is somewhat similar, Auto-Correct
+          if (dist <= 3 && Math.abs(cleanBuyerId.length - EXPECTED_BUYER_ID.length) <= 1) {
+            const oldId = item.buyer_tax_id;
+            item.buyer_tax_id = EXPECTED_BUYER_ID;
+            cleanBuyerId = EXPECTED_BUYER_ID; // Update for verification check below
+            logs.push(`Auto-Correction: Fuzzy Match Fixed Buyer ID (${oldId} -> ${EXPECTED_BUYER_ID}, dist=${dist})`);
+            fuzzyMatchApplied = true;
+            needsVisionValidation = true; // Double-check with Vision API
+          } else {
+            // Real Error - definitely needs Vision validation
+            needsVisionValidation = true;
+            item.verification.flagged_fields.push('buyer_tax_id');
+            logs.push(`Validation Fail: Buyer ID is ${cleanBuyerId}, expected ${EXPECTED_BUYER_ID}`);
+          }
+        }
+      } else {
+        // Missing buyer tax ID - flag for Vision check
+        needsVisionValidation = true;
+        logs.push(`Buyer Tax ID missing - will attempt Vision API extraction`);
+      }
+
+      // B2. Vision API Cross-Validation (Phase 2 Enhancement)
+      if (needsVisionValidation) {
+        try {
+          logs.push(`[Vision API] Initiating cross-validation for Buyer Tax ID`);
+          const visionResult = await validateTaxIdWithVision(base64Data, EXPECTED_BUYER_ID, mimeType);
+
+          if (visionResult.extractedId) {
+            logs.push(`[Vision API] Extracted: ${visionResult.extractedId}, Confidence: ${visionResult.confidence}%`);
+
+            // Case 1: Vision API confirms Gemini's result
+            if (visionResult.extractedId === item.buyer_tax_id) {
+              logs.push(`[Vision API] Confirmed Gemini result: ${item.buyer_tax_id}`);
+              // Remove flag if both agree
+              if (fuzzyMatchApplied) {
+                const flagIndex = item.verification.flagged_fields.indexOf('buyer_tax_id');
+                if (flagIndex > -1) {
+                  item.verification.flagged_fields.splice(flagIndex, 1);
+                }
+              }
+            }
+            // Case 2: Vision API disagrees - prefer Vision for handwriting
+            else {
+              const oldValue = item.buyer_tax_id;
+              item.buyer_tax_id = visionResult.extractedId;
+              logs.push(`[Vision API] Corrected Buyer ID: ${oldValue} -> ${visionResult.extractedId}`);
+
+              // If Vision API result matches expected, remove flag
+              if (visionResult.extractedId === EXPECTED_BUYER_ID) {
+                const flagIndex = item.verification.flagged_fields.indexOf('buyer_tax_id');
+                if (flagIndex > -1) {
+                  item.verification.flagged_fields.splice(flagIndex, 1);
+                }
+              }
+            }
+          } else {
+            logs.push(`[Vision API] Could not extract Buyer Tax ID`);
+          }
+        } catch (visionError: any) {
+          // Vision API failed - keep Gemini result
+          logs.push(`[Vision API] Error: ${visionError.message || 'Unknown error'}`);
+          console.warn('[Vision API] Validation failed, using Gemini result:', visionError);
         }
       }
 
@@ -234,7 +363,10 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
 
       item.trace_logs = logs;
       return item;
-    });
+    }));
+
+    // Assign processed results back
+    results = processedResults;
 
     // --- Hybrid Auto-Escalation Logic ---
     // Only enabled if the user explicitly selected the Hybrid option (modelName incl. 'hybrid')

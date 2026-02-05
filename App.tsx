@@ -2,6 +2,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Upload, Loader2, AlertCircle, CheckCircle2, Edit3, Trash2, FileSearch, Key, PlusSquare, FileDown, Clock, FileText, FileSpreadsheet, ArrowLeftRight, AlertTriangle, ArrowRight, UploadCloud, FolderOpen, ChevronRight, LogOut, Calendar } from 'lucide-react';
 import { analyzeInvoice } from './services/geminiService';
+import { preprocessImageForOCR } from './utils/imagePreprocessing';
 import { InvoiceData, AppStatus, InvoiceEntry, Project, ERPRecord, ProjectMeta, ProcessingState } from './types';
 import InvoiceEditor from './components/InvoiceEditor';
 import ErrorReviewPage from './components/ErrorReviewPage';
@@ -30,7 +31,7 @@ const App: React.FC = () => {
     const [project, setProject] = useState<Project | null>(null);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);
-    const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-flash-hybrid');
+    const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-pro');
     const [batchStats, setBatchStats] = useState({ startTime: 0, endTime: 0, totalDuration: 0 });
 
     const [isCreating, setIsCreating] = useState(false);
@@ -438,12 +439,27 @@ const App: React.FC = () => {
             logger.info('QUEUE', `Processing item: ${item.id}`);
 
             try {
-                const base64 = await fileToBase64(item.file);
+                // Step 1: Preprocess image for better OCR accuracy
+                let processedFile = item.file;
+                if (item.file.type.startsWith('image/')) {
+                    try {
+                        processedFile = await preprocessImageForOCR(item.file, {
+                            sharpen: true,
+                            increaseContrast: true,
+                            grayscale: false // Keep color for now
+                        });
+                        logger.info('PREPROCESSING', `Enhanced image: ${item.id}`);
+                    } catch (err) {
+                        logger.warn('PREPROCESSING', `Failed to preprocess ${item.id}, using original`, err);
+                    }
+                }
+
+                const base64 = await fileToBase64(processedFile);
                 // Log start time for this specific item
                 const startTime = Date.now();
 
                 // Pass the Excel-derived seller map to the AI service
-                const results = await analyzeInvoice(base64, item.file.type, selectedModel, 0, knownSellersFromExcel);
+                const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellersFromExcel);
 
                 if (results && results.length > 0) {
 
