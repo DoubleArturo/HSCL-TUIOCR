@@ -1,3 +1,8 @@
+---
+name: Business Logic & Accounting Rules
+description: Immutable business rules, data models, and validation logic for financial audit integrity.
+---
+
 # Skill: Business Logic & Accounting Rules
 
 ## Overview

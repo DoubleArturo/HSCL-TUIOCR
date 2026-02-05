@@ -1,3 +1,8 @@
+---
+name: OCR Prompt Engineering & AI Strategy
+description: Strategy for AI interaction, System Instructions, JSON Schema, and Hybrid Model Auto-Escalation.
+---
+
 # Skill: OCR Prompt Engineering & AI Strategy
 
 ## Overview

@@ -1,3 +1,8 @@
+---
+name: UI Interface Architecture
+description: Documentation of the frontend architecture, component hierarchy, and state management for UI consistency.
+---
+
 # Skill: UI Interface Architecture
 
 ## Overview
