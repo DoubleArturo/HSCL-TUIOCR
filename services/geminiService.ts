@@ -1,4 +1,4 @@
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, Part } from "@google/genai";
 import { InvoiceData } from "../types";
 import { validateTaxIdWithVision } from './visionService';
 
@@ -156,6 +156,16 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     };
 
     const effectiveModel = modelName.includes('hybrid') ? 'gemini-2.5-flash' : modelName;
+
+    // DEBUG LOGGING
+    console.log("DEBUG GEMINI PAYLOAD:");
+    console.log("Model:", effectiveModel);
+    console.log("Typeof base64Data:", typeof base64Data);
+    console.log("Base64Data Length:", base64Data.length);
+    console.log("MimeType:", mimeType);
+    console.log("ContentPart:", JSON.stringify(contentPart, null, 2));
+    console.log("SystemInstruction (Type):", typeof SYSTEM_INSTRUCTION);
+
 
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: effectiveModel, // Use the real model name (stripped of hybrid suffix)
