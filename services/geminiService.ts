@@ -35,6 +35,12 @@ Before extracting any data, classify the document type:
 - If the handwritten or printed text looks remotely like "16547744" (e.g., "16547744", "I6547744", "16541744"), **OUTPUT "16547744"**.
 - Priority: If there is ambiguity, prefer "16547744" over other interpretations.
 
+### 1.1 Handwriting & Grid Handling (IMPORTANT)
+- **Ignore Grid Lines**: The document often contains **blue or printed grid boxes** for the Tax ID. Treat these vertical/horizontal lines as background noise.
+- **Focus on Ink**: Pay attention only to the **handwritten black/dark ink** inside the boxes.
+- **Do not read lines as '1' or 'I'**: Vertical separators `| ` are NOT the digit 1.
+- **Layout**: If digits are separated by boxes (e.g., `| 1 | 6 | 5 | `), concatenate them into a single string "165".
+
 ### 2. Field Extraction Rules
 - **Invoice Number**: Must be 2 English Letters + 8 Digits (e.g., AB-12345678). Remove strict spaces.
 - **Date**: Normalize to YYYY-MM-DD. Handle ROC years (e.g., 113/05/01 -> 2024-05-01).
@@ -135,7 +141,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const analyzeInvoice = async (base64Data: string, mimeType: string, modelName: string = 'gemini-1.5-flash', retryCount = 0, knownSellers: Record<string, string> = {}): Promise<InvoiceData[]> => {
   // Support both process.env.GEMINI_API_KEY (User instruction) and process.env.API_KEY (System standard)
-  const apiKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
 
   // Create a new GoogleGenAI instance right before making an API call 
   // to ensure it always uses the most up-to-date API key from the environment.

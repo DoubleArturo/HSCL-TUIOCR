@@ -1,27 +1,32 @@
 
 import React, { useState, useMemo } from 'react';
-import { Project, InvoiceEntry, InvoiceData } from '../types';
+
+import { Project, InvoiceEntry, InvoiceData, AuditRow } from '../types';
 import * as Lucide from 'lucide-react';
 import InvoicePreview from './InvoicePreview';
 import InvoiceForm from './InvoiceForm';
 
 interface Props {
     project: Project;
+    auditList: AuditRow[];
     onBack: () => void;
     onUpdateInvoice: (id: string, updatedData: InvoiceData) => void;
 }
 
 // Error category types
-type ErrorCategory = 'all' | 'buyer_tax_id' | 'amount_logic' | 'seller_tax_id' | 'other';
+type ErrorCategory = 'all' | 'buyer_tax_id' | 'amount_logic' | 'seller_tax_id' | 'erp_mismatch' | 'other';
 
 interface ErrorItem {
     entry: InvoiceEntry;
     invoiceIndex: number;
     categories: ErrorCategory[];
     reasons: string[];
+    erp?: any; // ERP Record
 }
 
-const ErrorReviewPage: React.FC<Props> = ({ project, onBack, onUpdateInvoice }) => {
+
+
+const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdateInvoice }) => {
     const [selectedCategory, setSelectedCategory] = useState<ErrorCategory>('all');
 
     // Comprehensive error categorization
@@ -32,58 +37,108 @@ const ErrorReviewPage: React.FC<Props> = ({ project, onBack, onUpdateInvoice }) 
             buyer_tax_id: 0,
             amount_logic: 0,
             seller_tax_id: 0,
+            erp_mismatch: 0,
             other: 0
         };
 
-        project.invoices.forEach(entry => {
-            entry.data.forEach((inv, idx) => {
-                const categories: ErrorCategory[] = [];
-                const reasons: string[] = [];
+        // We iterate auditList to ensure we capture ERP mismatches AND intrinsic errors
+        auditList.forEach(row => {
+            // Each AuditRow might contain multiple files (if one ERP matches multiple params)
+            // Or "Extra Files" (no ERP).
 
-                // 1. Buyer Tax ID Error
-                if (inv.verification?.flagged_fields?.includes('buyer_tax_id') ||
-                    (inv.buyer_tax_id && inv.buyer_tax_id !== '16547744')) {
-                    categories.push('buyer_tax_id');
-                    reasons.push('買方統編錯誤');
-                    counts.buyer_tax_id++;
-                }
+            row.files.forEach(entry => {
+                entry.data.forEach((inv, idx) => {
+                    const categories: ErrorCategory[] = [];
+                    const reasons: string[] = [];
 
-                // 2. Amount Logic Error
-                if (!inv.verification?.logic_is_valid) {
-                    categories.push('amount_logic');
-                    reasons.push('金額勾稽錯誤');
-                    counts.amount_logic++;
-                }
-
-                // 3. Seller Tax ID Issues
-                if (inv.seller_tax_id && (inv.seller_tax_id.includes('?') || inv.seller_tax_id === 'NOT_FOUND')) {
-                    categories.push('seller_tax_id');
-                    reasons.push('賣方統編不清');
-                    counts.seller_tax_id++;
-                }
-
-                // 4. Other verification flags
-                if (inv.verification?.flagged_fields && inv.verification.flagged_fields.length > 0) {
-                    const otherFlags = inv.verification.flagged_fields.filter(
-                        f => !['buyer_tax_id', 'seller_tax_id'].includes(f)
-                    );
-                    if (otherFlags.length > 0 && categories.length === 0) {
-                        categories.push('other');
-                        reasons.push('其他驗證異常');
-                        counts.other++;
+                    // 1. Buyer Tax ID Error (Strict Value Check)
+                    if (inv.buyer_tax_id !== '16547744') {
+                        categories.push('buyer_tax_id');
+                        if (!reasons.includes('買方統編錯誤')) reasons.push('買方統編錯誤');
+                        counts.buyer_tax_id++;
                     }
-                }
 
-                // Only add if there are errors
-                if (categories.length > 0) {
-                    list.push({ entry, invoiceIndex: idx, categories, reasons });
-                    counts.all++;
-                }
+                    // 2. Amount Logic Error (Intrinsic)
+                    if (!inv.verification?.logic_is_valid) {
+                        categories.push('amount_logic');
+                        if (!reasons.includes('金額勾稽錯誤')) reasons.push('金額勾稽錯誤');
+                        counts.amount_logic++;
+                    }
+
+                    // 3. Seller Tax ID Intrinsic Issues
+                    if (inv.seller_tax_id && (inv.seller_tax_id.includes('?') || inv.seller_tax_id === 'NOT_FOUND')) {
+                        categories.push('seller_tax_id');
+                        if (!reasons.includes('賣方統編不清')) reasons.push('賣方統編不清');
+                        counts.seller_tax_id++;
+                    }
+
+                    // 4. ERP Mismatches (From AuditRow)
+                    // Only apply if this file is actually part of the mismatch determination. 
+                    // Usually safe to assume if the row is MISMATCH, the invoices in it are suspect.
+                    if (row.auditStatus === 'MISMATCH') {
+                        if (row.diffDetails.includes('amount')) {
+                            categories.push('erp_mismatch');
+                            if (!reasons.includes('ERP金額不符')) reasons.push('ERP金額不符');
+                            counts.erp_mismatch++;
+                        }
+                        if (row.diffDetails.includes('tax_id')) {
+                            categories.push('erp_mismatch');
+                            if (!reasons.includes('ERP賣方統編不符')) reasons.push('ERP賣方統編不符');
+                            counts.erp_mismatch++;
+                        }
+                        if (row.diffDetails.includes('buyer_id_error')) {
+                            // Already handled by intrinsic check usually, but if intrinsic passed and this failed? 
+                            // (Unlikely if logic is synced, but safe to add)
+                            if (!categories.includes('buyer_tax_id')) categories.push('buyer_tax_id');
+                            if (!reasons.includes('買方統編錯誤')) reasons.push('買方統編錯誤 (ERP要求)');
+                        }
+                    }
+
+                    // 5. Other verification flags
+                    if (inv.verification?.flagged_fields && inv.verification.flagged_fields.length > 0) {
+                        const otherFlags = inv.verification.flagged_fields.filter(
+                            f => !['buyer_tax_id', 'seller_tax_id'].includes(f)
+                        );
+                        if (otherFlags.length > 0 && categories.length === 0) { // Only if no other major errors? Or always?
+                            // Let's always add if it's a flag we haven't covered
+                            categories.push('other');
+                            reasons.push('AI標記異常');
+                            counts.other++;
+                        }
+                    }
+
+                    // Dedupe categories
+                    const uniqueCategories = Array.from(new Set(categories));
+
+                    // Only add if there are errors AND not manually verified
+                    if (uniqueCategories.length > 0 && !inv.manually_verified) {
+                        list.push({ entry, invoiceIndex: idx, categories: uniqueCategories, reasons, erp: row.erp });
+                        counts.all++;
+                    }
+                });
             });
         });
 
-        return { errorList: list, categoryCounts: counts };
-    }, [project.invoices]);
+        // Deduplicate list? 
+        // auditList rows are unique by definition (One ERP or One Extra).
+        // But `row.files` might overlap? 
+        // App.tsx logic: "matchingFiles" are found.
+        // If one file helps match 2 ERPs (unlikely 1:1 usually), it might appear twice.
+        // But `files.flatMap` in App.tsx suggests N:M?
+        // Let's assume unique enough or acceptable duplication for now.
+        // Actually, let's dedupe by entry.id + index just in case.
+        const uniqueList = list.filter((item, index, self) =>
+            index === self.findIndex((t) => (
+                t.entry.id === item.entry.id && t.invoiceIndex === item.invoiceIndex
+            ))
+        );
+
+        // Recalculate 'all' count based on unique list
+        counts.all = uniqueList.length;
+
+        return { errorList: uniqueList, categoryCounts: counts };
+    }, [auditList]); // Depend on auditList, not project.invoices
+
 
     // Filter by category
     const filteredErrorList = useMemo(() => {
@@ -175,128 +230,72 @@ const ErrorReviewPage: React.FC<Props> = ({ project, onBack, onUpdateInvoice }) 
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Sidebar List */}
-                <div className="w-[380px] bg-white border-r border-gray-200 flex flex-col shrink-0 z-40">
+                <div className="w-[240px] bg-white border-r border-gray-200 flex flex-col shrink-0 z-40 transition-all duration-300">
                     {/* Category Filters */}
                     <div className="p-3 border-b bg-gradient-to-br from-gray-50 to-white">
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">錯誤類別篩選</h3>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
-                                onClick={() => setSelectedCategory('all')}
-                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedCategory === 'all'
-                                    ? 'bg-indigo-600 text-white shadow-lg'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">錯誤類別篩選</label>
+                        <div className="relative">
+                            <select
+                                value={selectedCategory}
+                                onChange={(e) => setSelectedCategory(e.target.value as ErrorCategory)}
+                                className="w-full appearance-none bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-lg py-2 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                             >
-                                <div className="flex items-center justify-between">
-                                    <span>全部</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${selectedCategory === 'all' ? 'bg-indigo-500' : 'bg-gray-200'
-                                        }`}>
-                                        {categoryCounts.all}
-                                    </span>
-                                </div>
-                            </button>
-                            <button
-                                onClick={() => setSelectedCategory('buyer_tax_id')}
-                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedCategory === 'buyer_tax_id'
-                                    ? 'bg-rose-600 text-white shadow-lg'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <span>買方統編</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${selectedCategory === 'buyer_tax_id' ? 'bg-rose-500' : 'bg-gray-200'
-                                        }`}>
-                                        {categoryCounts.buyer_tax_id}
-                                    </span>
-                                </div>
-                            </button>
-                            <button
-                                onClick={() => setSelectedCategory('amount_logic')}
-                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedCategory === 'amount_logic'
-                                    ? 'bg-amber-600 text-white shadow-lg'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <span>金額勾稽</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${selectedCategory === 'amount_logic' ? 'bg-amber-500' : 'bg-gray-200'
-                                        }`}>
-                                        {categoryCounts.amount_logic}
-                                    </span>
-                                </div>
-                            </button>
-                            <button
-                                onClick={() => setSelectedCategory('seller_tax_id')}
-                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedCategory === 'seller_tax_id'
-                                    ? 'bg-orange-600 text-white shadow-lg'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <span>賣方統編</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${selectedCategory === 'seller_tax_id' ? 'bg-orange-500' : 'bg-gray-200'
-                                        }`}>
-                                        {categoryCounts.seller_tax_id}
-                                    </span>
-                                </div>
-                            </button>
-                            <button
-                                onClick={() => setSelectedCategory('other')}
-                                className={`px-3 py-2 rounded-lg text-xs font-bold transition-all ${selectedCategory === 'other'
-                                    ? 'bg-gray-600 text-white shadow-lg'
-                                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                            >
-                                <div className="flex items-center justify-between">
-                                    <span>其他</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] ${selectedCategory === 'other' ? 'bg-gray-500' : 'bg-gray-200'
-                                        }`}>
-                                        {categoryCounts.other}
-                                    </span>
-                                </div>
-                            </button>
+                                <option value="all">全部異常 ({categoryCounts.all})</option>
+                                <option value="buyer_tax_id">買方統編錯誤 ({categoryCounts.buyer_tax_id})</option>
+                                <option value="amount_logic">金額勾稽錯誤 ({categoryCounts.amount_logic})</option>
+                                <option value="seller_tax_id">賣方統編不清 ({categoryCounts.seller_tax_id})</option>
+                                <option value="erp_mismatch">ERP 比對異常 ({categoryCounts.erp_mismatch})</option>
+                                <option value="other">其他 ({categoryCounts.other})</option>
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
+                                <Lucide.ChevronDown className="w-4 h-4" />
+                            </div>
                         </div>
                     </div>
 
-                    <div className="p-4 border-b bg-gray-50">
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">待處理異常 QUEUES</h3>
+                    <div className="bg-gray-50 px-3 py-2 border-b">
+                        <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">待處理 ({filteredErrorList.length})</h3>
                     </div>
+
                     <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-2">
                         {filteredErrorList.map((item, idx) => (
                             <div
                                 key={`${item.entry.id}_${item.invoiceIndex}`}
                                 onClick={() => setSelectedIndex(idx)}
-                                className={`p-3 rounded-xl border transition-all cursor-pointer hover:shadow-md group ${selectedIndex === idx ? 'bg-indigo-50 border-indigo-200 ring-2 ring-indigo-500/20' : 'bg-white border-gray-100 hover:border-gray-300'}`}
+                                className={`p-2.5 rounded-lg border transition-all cursor-pointer hover:shadow-md group relative ${selectedIndex === idx ? 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-500/30' : 'bg-white border-gray-100 hover:border-gray-300'}`}
                             >
-                                <div className="flex justify-between items-start mb-2">
-                                    <div className="flex flex-wrap gap-1">
-                                        {item.reasons.map((reason, ridx) => (
-                                            <span key={ridx} className={`text-[10px] font-black px-1.5 py-0.5 rounded ${reason.includes('買方') ? 'bg-rose-100 text-rose-600' :
-                                                reason.includes('金額') ? 'bg-amber-100 text-amber-600' :
+                                <div className="flex justify-between items-start mb-1.5">
+                                    <span className="font-bold text-gray-800 text-xs truncate max-w-[140px] block" title={item.entry.id}>{item.entry.id}</span>
+                                    <span className="text-[9px] text-gray-400 font-mono shrink-0">#{idx + 1}</span>
+                                </div>
+
+                                <div className="flex flex-wrap gap-1 mb-1.5">
+                                    {item.reasons.map((reason, ridx) => (
+                                        <span key={ridx} className={`text-[9px] font-black px-1.5 py-0.5 rounded ${reason.includes('買方') ? 'bg-rose-100 text-rose-600' :
+                                            reason.includes('金額') ? 'bg-amber-100 text-amber-600' :
+                                                reason.includes('ERP') ? 'bg-purple-100 text-purple-600' :
                                                     reason.includes('賣方') ? 'bg-orange-100 text-orange-600' :
                                                         'bg-gray-100 text-gray-600'
-                                                }`}>
-                                                {reason}
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <span className="text-[10px] text-gray-400 font-mono">#{idx + 1}</span>
+                                            }`}>
+                                            {reason}
+                                        </span>
+                                    ))}
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    <span className="font-bold text-gray-800 text-sm truncate">{item.entry.id}</span>
-                                    {item.entry.data[item.invoiceIndex]?.document_type && (
-                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${item.entry.data[item.invoiceIndex].document_type === '統一發票' ? 'bg-blue-100 text-blue-700' :
-                                                item.entry.data[item.invoiceIndex].document_type === 'Invoice' ? 'bg-purple-100 text-purple-700' :
-                                                    item.entry.data[item.invoiceIndex].document_type === '進口報關' ? 'bg-teal-100 text-teal-700' :
-                                                        'bg-gray-100 text-gray-600'
+
+                                <div className="flex items-center justify-between">
+                                    {item.entry.data[item.invoiceIndex]?.document_type ? (
+                                        <span className={`text-[9px] font-bold px-1 py-px rounded whitespace-nowrap ${item.entry.data[item.invoiceIndex].document_type === '統一發票' ? 'bg-blue-50 text-blue-600' :
+                                            item.entry.data[item.invoiceIndex].document_type === 'Invoice' ? 'bg-purple-50 text-purple-600' :
+                                                item.entry.data[item.invoiceIndex].document_type === '進口報關' ? 'bg-teal-50 text-teal-600' :
+                                                    'bg-gray-50 text-gray-500'
                                             }`}>
                                             {item.entry.data[item.invoiceIndex].document_type}
                                         </span>
-                                    )}
-                                </div>
-                                <div className="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                                    <Lucide.FileText className="w-3 h-3" />
-                                    {item.invoiceIndex + 1} / {item.entry.data.length}
+                                    ) : <span></span>}
+                                    <div className="text-[9px] text-gray-400 flex items-center gap-1">
+                                        <Lucide.FileText className="w-2.5 h-2.5" />
+                                        {item.invoiceIndex + 1}/{item.entry.data.length}
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -304,7 +303,7 @@ const ErrorReviewPage: React.FC<Props> = ({ project, onBack, onUpdateInvoice }) 
                 </div>
 
                 {/* Split View */}
-                <div className="flex-1 flex relative">
+                <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
                     {/* Re-use InvoicePreview */}
                     {/* Be careful with `currentIndex` which is for the LIST of files in InvoicePreview. 
                      Here we just want to show ONE file.
@@ -315,12 +314,14 @@ const ErrorReviewPage: React.FC<Props> = ({ project, onBack, onUpdateInvoice }) 
                      So we pass entries=[currentEntry] and currentIndex=0. 
                      And ignore onSwitchFile.
                  */}
-                    <InvoicePreview
-                        currentEntry={currentEntry}
-                        entries={[currentEntry]} // Hide switcher effectively or show just one
-                        currentIndex={0}
-                        onSwitchFile={() => { }}
-                    />
+                    <div className="w-[650px] min-w-[650px] shrink-0 h-full flex flex-col relative">
+                        <InvoicePreview
+                            currentEntry={currentEntry}
+                            entries={[currentEntry]} // Hide switcher effectively or show just one
+                            currentIndex={0}
+                            onSwitchFile={() => { }}
+                        />
+                    </div>
 
                     {/* Re-use InvoiceForm */}
                     {/* Wrapper to handle state */}
@@ -330,9 +331,10 @@ const ErrorReviewPage: React.FC<Props> = ({ project, onBack, onUpdateInvoice }) 
                         invoiceIndex={selectedItem.invoiceIndex}
                         totalInvoices={currentEntry.data.length}
                         entryId={currentEntry.id}
+                        erpRecord={selectedItem.erp}
                         onUpdate={(newData) => onUpdateInvoice(currentEntry.id, newData)}
                         onNext={() => {
-                            if (selectedIndex < errorList.length - 1) setSelectedIndex(s => s + 1);
+                            if (selectedIndex < filteredErrorList.length - 1) setSelectedIndex(s => s + 1);
                             else alert('已是最後一筆');
                         }}
                     />
@@ -348,9 +350,10 @@ const ErrorReviewFormWrapper: React.FC<{
     invoiceIndex: number,
     totalInvoices: number,
     entryId: string,
+    erpRecord?: any,
     onUpdate: (data: InvoiceData) => void,
     onNext: () => void
-}> = ({ initialData, invoiceIndex, totalInvoices, entryId, onUpdate, onNext }) => {
+}> = ({ initialData, invoiceIndex, totalInvoices, entryId, erpRecord, onUpdate, onNext }) => {
     const [formData, setFormData] = React.useState(initialData);
 
     // Auto-save on unmount or explicit save? 
@@ -368,6 +371,7 @@ const ErrorReviewFormWrapper: React.FC<{
             setFormData={setFormData}
             currentInvoiceIndex={invoiceIndex}
             totalInvoices={totalInvoices}
+            erpRecord={erpRecord}
             onInvoiceSwitch={() => { }} // Disable switching invoices within form, use sidebar
             onSave={handleSave}
             showCloseButton={false}

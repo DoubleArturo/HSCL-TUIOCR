@@ -45,14 +45,12 @@ const InvoicePreview: React.FC<Props> = ({ currentEntry, entries, currentIndex, 
     }, [currentIndex]);
 
     const handleWheel = (e: React.WheelEvent) => {
-        if (isPdf) return;
         e.preventDefault();
-        const delta = e.deltaY > 0 ? -0.15 : 0.15;
+        const delta = e.deltaY > 0 ? -0.035 : 0.035;
         setZoom(prev => Math.min(Math.max(prev + delta, 0.3), 8));
     };
 
     const handleMouseDown = (e: React.MouseEvent) => {
-        if (isPdf) return;
         setIsDragging(true);
         setDragStart({ x: e.clientX - position.x, y: e.clientY - position.y });
     };
@@ -66,7 +64,7 @@ const InvoicePreview: React.FC<Props> = ({ currentEntry, entries, currentIndex, 
     const resetView = () => { setZoom(1); setPosition({ x: 0, y: 0 }); };
 
     return (
-        <div className="flex-1 bg-gray-200 relative overflow-hidden flex flex-col h-full w-full">
+        <div className="flex-1 bg-gray-200 relative overflow-hidden flex flex-col h-full min-w-0">
             {/* Controls */}
             <div className="absolute top-6 left-6 z-20 flex flex-col gap-3">
                 {/* File Switcher (Tabs) */}
@@ -130,8 +128,8 @@ const InvoicePreview: React.FC<Props> = ({ currentEntry, entries, currentIndex, 
                 )}
             </div>
 
-            <div className={`flex-1 relative ${isPdf || !hasPreview ? '' : 'cursor-grab active:cursor-grabbing'} bg-gray-300 overflow-auto flex items-center justify-center`} onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-                <div className={`transition-transform duration-75 will-change-transform ${isPdf ? '' : 'absolute inset-0 flex items-center justify-center'}`} style={isPdf ? {} : { transform: `translate(${position.x}px, ${position.y}px) scale(${zoom})` }}>
+            <div className={`flex-1 relative ${!hasPreview ? '' : 'cursor-grab active:cursor-grabbing'} bg-gray-300 overflow-hidden flex items-center justify-center`} onWheel={handleWheel} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+                <div className={`transition-transform duration-75 will-change-transform ${isPdf ? 'flex items-center justify-center' : 'absolute inset-0 flex items-center justify-center'}`} style={{ transform: `translate(${position.x}px, ${position.y}px) ${isPdf ? '' : `scale(${zoom})`}` }}>
                     {hasPreview ? (
                         isPdf ? (
                             <div className="relative shadow-2xl">

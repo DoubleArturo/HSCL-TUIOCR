@@ -43,6 +43,7 @@ export interface InvoiceData {
   amount_tax: number;
   amount_total: number;
   has_stamp: boolean;
+  manually_verified?: boolean; // New: User manually confirmed it's correct
   verification: VerificationData;
   field_confidence: FieldConfidence;
   usage_metadata?: UsageMetadata; // New: Cost tracking
@@ -99,4 +100,16 @@ export interface ProcessingState {
   current: number;
   total: number;
   status: 'IDLE' | 'PROCESSING' | 'COMPLETED';
+}
+
+export interface AuditRow {
+  key: string;
+  id: string; // Voucher ID or File ID
+  erp: ERPRecord | null;
+  files: InvoiceEntry[];
+  file: InvoiceEntry | null; // Primary file
+  ocr: InvoiceData | null;   // Flattened/Summary OCR data
+  auditStatus: 'MATCH' | 'MISMATCH' | 'MISSING_FILE' | 'EXTRA_FILE';
+  diffDetails: string[];
+  initialInvoiceIndex: number;
 }

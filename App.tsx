@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Upload, Loader2, AlertCircle, CheckCircle2, Edit3, Trash2, FileSearch, Key, PlusSquare, FileDown, Clock, FileText, FileSpreadsheet, ArrowLeftRight, AlertTriangle, ArrowRight, UploadCloud, FolderOpen, ChevronRight, LogOut, Calendar } from 'lucide-react';
 import { analyzeInvoice } from './services/geminiService';
 import { preprocessImageForOCR } from './utils/imagePreprocessing';
-import { InvoiceData, AppStatus, InvoiceEntry, Project, ERPRecord, ProjectMeta, ProcessingState } from './types';
+import { InvoiceData, AppStatus, InvoiceEntry, Project, ERPRecord, ProjectMeta, ProcessingState, AuditRow } from './types';
 import InvoiceEditor from './components/InvoiceEditor';
 import ErrorReviewPage from './components/ErrorReviewPage';
 import CostDashboard from './components/CostDashboard';
@@ -781,6 +781,7 @@ const App: React.FC = () => {
         return (
             <ErrorReviewPage
                 project={project}
+                auditList={auditList}
                 onBack={() => setView('WORKSPACE')}
                 onUpdateInvoice={handleSave}
             />
@@ -972,25 +973,25 @@ const App: React.FC = () => {
                         <div className="overflow-auto custom-scrollbar flex-1">
                             <table className="w-full text-left border-collapse relative">
                                 <thead className="sticky top-0 z-20 shadow-sm text-[11px]">
-                                    <tr className="font-black uppercase tracking-widest text-center">
-                                        <th className="bg-slate-100 py-2 border-b border-r border-gray-200 w-[42%] text-slate-700" colSpan={6}>ERP 帳務資料</th>
-                                        <th className="bg-gray-50 py-2 border-b border-r border-gray-200 w-[6%] text-gray-500">狀態</th>
-                                        <th className="bg-indigo-50 py-2 border-b border-gray-200 w-[52%] text-indigo-700" colSpan={6}>OCR 辨識結果</th>
+                                    <tr className="font-black uppercase tracking-widest text-center sticky top-0 z-20">
+                                        <th className="bg-slate-100 py-2 border-b border-r border-gray-200 w-[42%] text-slate-700 shadow-sm" colSpan={6}>ERP 帳務資料</th>
+                                        <th className="bg-gray-50 py-2 border-b border-r border-gray-200 w-[6%] text-gray-500 shadow-sm">狀態</th>
+                                        <th className="bg-indigo-50 py-2 border-b border-gray-200 w-[52%] text-indigo-700 shadow-sm" colSpan={6}>OCR 辨識結果</th>
                                     </tr>
-                                    <tr className="bg-white border-b border-gray-100 text-gray-400">
-                                        <th className="pl-4 py-2 font-bold text-slate-500">傳票編號</th>
-                                        <th className="px-1 py-2 font-bold text-slate-500">發票號碼</th>
-                                        <th className="px-1 py-2 text-right">銷售額合計</th>
-                                        <th className="px-1 py-2 text-right">營業稅</th>
-                                        <th className="px-1 py-2 text-right font-bold text-slate-600">總計</th>
-                                        <th className="px-1 py-2 text-center border-r">統編</th>
-                                        <th className="px-1 py-2 text-center border-r">比對</th>
-                                        <th className="pl-4 py-2 text-indigo-400">OCR 發票號</th>
-                                        <th className="px-1 py-2 text-right text-indigo-300">銷售額合計</th>
-                                        <th className="px-1 py-2 text-right text-indigo-300">營業稅</th>
-                                        <th className="px-1 py-2 text-right font-bold text-indigo-500">總計</th>
-                                        <th className="px-1 py-2 text-center text-indigo-300">賣方統編</th>
-                                        <th className="px-1 py-2 text-right pr-4">功能</th>
+                                    <tr className="bg-white border-b border-gray-100 text-gray-400 sticky top-[33px] z-20 shadow-sm">
+                                        <th className="pl-4 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">傳票編號</th>
+                                        <th className="px-1 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">發票號碼</th>
+                                        <th className="px-1 py-2 text-right bg-slate-50/90 backdrop-blur">銷售額合計</th>
+                                        <th className="px-1 py-2 text-right bg-slate-50/90 backdrop-blur">營業稅</th>
+                                        <th className="px-1 py-2 text-right font-bold text-slate-600 bg-slate-50/90 backdrop-blur">總計</th>
+                                        <th className="px-1 py-2 text-center border-r bg-slate-50/90 backdrop-blur">統編</th>
+                                        <th className="px-1 py-2 text-center border-r bg-white/90 backdrop-blur">比對</th>
+                                        <th className="pl-4 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">OCR 發票號</th>
+                                        <th className="px-1 py-2 text-right text-indigo-300 bg-indigo-50/90 backdrop-blur">銷售額合計</th>
+                                        <th className="px-1 py-2 text-right text-indigo-300 bg-indigo-50/90 backdrop-blur">營業稅</th>
+                                        <th className="px-1 py-2 text-right font-bold text-indigo-500 bg-indigo-50/90 backdrop-blur">總計</th>
+                                        <th className="px-1 py-2 text-center text-indigo-300 bg-indigo-50/90 backdrop-blur">賣方統編</th>
+                                        <th className="px-1 py-2 text-right pr-4 bg-indigo-50/90 backdrop-blur">功能</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-50 text-[13px]">
@@ -1020,6 +1021,15 @@ const App: React.FC = () => {
                                                     {isMismatch && (
                                                         <div className="flex flex-col items-center gap-0.5">
                                                             <AlertTriangle className="w-5 h-5 text-rose-500" />
+                                                            {row.ocr?.document_type && (
+                                                                <span className={`text-[9px] font-bold px-1 rounded mb-0.5 ${row.ocr.document_type === '統一發票' ? 'bg-blue-100 text-blue-700' :
+                                                                    row.ocr.document_type === 'Invoice' ? 'bg-purple-100 text-purple-700' :
+                                                                        row.ocr.document_type === '進口報關' ? 'bg-teal-100 text-teal-700' :
+                                                                            'bg-gray-100 text-gray-600'
+                                                                    }`}>
+                                                                    {row.ocr.document_type}
+                                                                </span>
+                                                            )}
                                                             {row.diffDetails.includes('buyer_id_error') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">買方錯誤</span>}
                                                             {row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
                                                             {row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">號碼錯誤</span>}
@@ -1068,7 +1078,7 @@ const App: React.FC = () => {
         .btn-blue { @apply bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100; }
         .btn-indigo { @apply bg-indigo-600 text-white hover:bg-indigo-700 border border-transparent; }
       `}</style>
-            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} onSave={handleSave} onClose={() => setSelectedKey(null)} />}
+            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} onSave={handleSave} onClose={() => setSelectedKey(null)} />}
         </div >
     );
 };
