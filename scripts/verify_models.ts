@@ -36,23 +36,49 @@ const toTest = [
     'gemini-2.5-pro'
 ];
 
+// Minimal schema to test
+const responseSchema = {
+    type: "ARRAY",
+    items: {
+        type: "OBJECT",
+        properties: {
+            invoice_number: { type: "STRING" }
+        }
+    }
+};
+
 async function verifyModel(modelName: string) {
     console.log(`Testing access to model: ${modelName}...`);
     try {
+        // Mock base64 image (small 1x1 pixel)
+        const base64Data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+        const contentPart = {
+            inlineData: {
+                mimeType: "image/png",
+                data: base64Data
+            }
+        };
+
         const response = await ai.models.generateContent({
             model: modelName,
             contents: {
-                parts: [{ text: "Hello, just checking availability. Reply with 'OK'." }]
+                parts: [
+                    contentPart,
+                    { text: "Extract invoice data." }
+                ]
+            },
+            config: {
+                systemInstruction: "You are a helpful assistant.",
+                responseMimeType: "application/json",
+                responseSchema: responseSchema
             }
         });
         const text = response.text;
         console.log(`✅ [${modelName}] Success! Response: ${text?.trim()}`);
         return true;
     } catch (error: any) {
-        if (error.status === 404 || error.message?.includes('not found') || error.message?.includes('404')) {
+        if (error.status === 404) {
             console.error(`❌ [${modelName}] Failed: Model not found (404).`);
-        } else if (error.status === 400 || error.message?.includes('400')) {
-            console.error(`❌ [${modelName}] Failed: Bad Request (400) - Likely invalid model name.`);
         } else {
             console.error(`❌ [${modelName}] Failed: ${error.message}`);
         }

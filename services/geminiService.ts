@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { InvoiceData } from "../types";
 import { validateTaxIdWithVision } from './visionService';
 
@@ -77,53 +77,53 @@ const levenshteinDistance = (a: string, b: string): number => {
 };
 
 const invoiceObjectSchema = {
-  type: Type.OBJECT,
+  type: "OBJECT",
   properties: {
     document_type: {
-      type: Type.STRING,
+      type: "STRING",
       enum: ["統一發票", "Invoice", "進口報關", "非發票"],
       description: "Document classification. Priority: Invoice > 進口報關 > 統一發票 > 非發票"
     },
-    error_code: { type: Type.STRING, enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
-    invoice_number: { type: Type.STRING },
-    invoice_date: { type: Type.STRING },
-    buyer_tax_id: { type: Type.STRING, description: "The Tax ID of the Buyer (買方/買受人)" },
-    seller_name: { type: Type.STRING },
-    seller_tax_id: { type: Type.STRING, description: "The Tax ID of the Seller (賣方). Use '?' for unclear digits." },
-    amount_sales: { type: Type.INTEGER },
-    amount_tax: { type: Type.INTEGER },
-    amount_total: { type: Type.INTEGER },
-    has_stamp: { type: Type.BOOLEAN },
+    error_code: { type: "STRING", enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
+    invoice_number: { type: "STRING" },
+    invoice_date: { type: "STRING" },
+    buyer_tax_id: { type: "STRING", description: "The Tax ID of the Buyer (買方/買受人)" },
+    seller_name: { type: "STRING" },
+    seller_tax_id: { type: "STRING", description: "The Tax ID of the Seller (賣方). Use '?' for unclear digits." },
+    amount_sales: { type: "INTEGER" },
+    amount_tax: { type: "INTEGER" },
+    amount_total: { type: "INTEGER" },
+    has_stamp: { type: "BOOLEAN" },
     verification: {
-      type: Type.OBJECT,
+      type: "OBJECT",
       properties: {
-        ai_confidence: { type: Type.NUMBER },
-        logic_is_valid: { type: Type.BOOLEAN },
-        flagged_fields: { type: Type.ARRAY, items: { type: Type.STRING } }
+        ai_confidence: { type: "NUMBER" },
+        logic_is_valid: { type: "BOOLEAN" },
+        flagged_fields: { type: "ARRAY", items: { type: "STRING" } }
       },
       required: ["ai_confidence", "logic_is_valid", "flagged_fields"]
     },
     field_confidence: {
-      type: Type.OBJECT,
+      type: "OBJECT",
       properties: {
-        invoice_number: { type: Type.NUMBER },
-        invoice_date: { type: Type.NUMBER },
-        buyer_tax_id: { type: Type.NUMBER },
-        seller_name: { type: Type.NUMBER },
-        seller_tax_id: { type: Type.NUMBER },
-        amount_sales: { type: Type.NUMBER },
-        amount_tax: { type: Type.NUMBER },
-        amount_total: { type: Type.NUMBER }
+        invoice_number: { type: "NUMBER" },
+        invoice_date: { type: "NUMBER" },
+        buyer_tax_id: { type: "NUMBER" },
+        seller_name: { type: "NUMBER" },
+        seller_tax_id: { type: "NUMBER" },
+        amount_sales: { type: "NUMBER" },
+        amount_tax: { type: "NUMBER" },
+        amount_total: { type: "NUMBER" }
       },
       required: ["invoice_number", "invoice_date", "buyer_tax_id", "seller_name", "seller_tax_id", "amount_sales", "amount_tax", "amount_total"]
     },
     usage_metadata: {
-      type: Type.OBJECT,
+      type: "OBJECT",
       properties: {
-        promptTokenCount: { type: Type.NUMBER },
-        candidatesTokenCount: { type: Type.NUMBER },
-        totalTokenCount: { type: Type.NUMBER },
-        cost_usd: { type: Type.NUMBER }
+        promptTokenCount: { type: "NUMBER" },
+        candidatesTokenCount: { type: "NUMBER" },
+        totalTokenCount: { type: "NUMBER" },
+        cost_usd: { type: "NUMBER" }
       }
     }
   },
@@ -132,7 +132,7 @@ const invoiceObjectSchema = {
 };
 
 const responseSchema = {
-  type: Type.ARRAY,
+  type: "ARRAY",
   items: invoiceObjectSchema,
 };
 
