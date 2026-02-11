@@ -38,8 +38,8 @@ Before extracting any data, classify the document type:
 ### 1.1 Handwriting & Grid Handling (IMPORTANT)
 - **Ignore Grid Lines**: The document often contains **blue or printed grid boxes** for the Tax ID. Treat these vertical/horizontal lines as background noise.
 - **Focus on Ink**: Pay attention only to the **handwritten black/dark ink** inside the boxes.
-- **Do not read lines as '1' or 'I'**: Vertical separators `| ` are NOT the digit 1.
-- **Layout**: If digits are separated by boxes (e.g., `| 1 | 6 | 5 | `), concatenate them into a single string "165".
+- **Do not read lines as '1' or 'I'**: Vertical separators \`| \` are NOT the digit 1.
+- **Layout**: If digits are separated by boxes (e.g., \`| 1 | 6 | 5 | \`), concatenate them into a single string "165".
 
 ### 2. Field Extraction Rules
 - **Invoice Number**: Must be 2 English Letters + 8 Digits (e.g., AB-12345678). Remove strict spaces.
