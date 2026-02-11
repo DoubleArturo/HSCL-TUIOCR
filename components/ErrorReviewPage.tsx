@@ -314,7 +314,7 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
                      So we pass entries=[currentEntry] and currentIndex=0. 
                      And ignore onSwitchFile.
                  */}
-                    <div className="w-[650px] min-w-[650px] shrink-0 h-full flex flex-col relative">
+                    <div className="flex-1 shrink-0 h-full flex flex-col relative min-w-[400px]">
                         <InvoicePreview
                             currentEntry={currentEntry}
                             entries={[currentEntry]} // Hide switcher effectively or show just one

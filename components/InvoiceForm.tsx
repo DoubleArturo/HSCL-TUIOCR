@@ -197,7 +197,7 @@ const InvoiceForm: React.FC<Props> = ({
     // Let's stick to updating state first. It changes the UI to green immediately.
 
     return (
-        <div className="w-[480px] min-w-[480px] shrink-0 flex flex-col border-l border-gray-200 bg-white z-30 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] h-full">
+        <div className="w-[450px] min-w-[450px] shrink-0 flex flex-col border-l border-gray-200 bg-white z-30 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] h-full">
             <div className="p-4 border-b flex justify-between items-center bg-white sticky top-0 z-40 shadow-sm/50 shrink-0">
                 <div className="flex items-center gap-2">
                     <h2 className="text-lg font-black text-gray-900 tracking-tight">稽核編輯器</h2>
