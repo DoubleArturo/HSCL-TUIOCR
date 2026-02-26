@@ -631,6 +631,15 @@ const App: React.FC = () => {
         setSelectedKey(null);
     };
 
+    const handleDeleteOCR = (id: string) => {
+        updateProjectInvoices(prev => prev.map(inv =>
+            inv.id === id
+                ? { ...inv, data: [], status: 'PENDING' as const, previewUrl: '' }
+                : inv
+        ));
+        setSelectedKey(null);
+    };
+
     // Audit Logic
     const auditList = useMemo(() => {
         if (!project) return [];
@@ -1170,7 +1179,7 @@ const App: React.FC = () => {
         .btn-blue { @apply bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100; }
         .btn-indigo { @apply bg-indigo-600 text-white hover:bg-indigo-700 border border-transparent; }
       `}</style>
-            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} onSave={handleSave} onClose={() => setSelectedKey(null)} />}
+            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} onSave={handleSave} onDelete={handleDeleteOCR} onClose={() => setSelectedKey(null)} />}
         </div >
     );
 };

@@ -21,9 +21,10 @@ interface Props {
   erpRecord?: any; // or ERPRecord type if imported, but use 'any' to avoid import clash if lazy
   onSave: (id: string, updatedData: InvoiceData) => void;
   onClose: () => void;
+  onDelete?: (id: string) => void;
 }
 
-const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoiceIndex, erpRecord, onSave, onClose }) => {
+const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoiceIndex, erpRecord, onSave, onClose, onDelete }) => {
   // Current active file index - default to matching ID or 0
   const [currentIndex, setCurrentIndex] = useState(() => {
     if (initialEntryId) {
@@ -227,6 +228,7 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
           erpRecord={erpRecord}
           onInvoiceSwitch={setCurrentInvoiceIndex}
           onSave={handleSave}
+          onDelete={onDelete ? () => { onDelete(currentEntry.id); onClose(); } : undefined}
           onClose={onClose}
           showCloseButton={true}
         />

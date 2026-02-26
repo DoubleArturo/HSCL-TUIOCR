@@ -13,13 +13,14 @@ interface Props {
     onSave: () => void;
     onClose?: () => void;
     showCloseButton?: boolean;
+    onDelete?: () => void;
 }
 
 const InvoiceForm: React.FC<Props> = ({
     formData, setFormData,
     currentInvoiceIndex, totalInvoices, onInvoiceSwitch,
     erpRecord,
-    onSave, onClose, showCloseButton = true
+    onSave, onClose, showCloseButton = true, onDelete
 }) => {
 
     const handleChange = (field: keyof InvoiceData, value: any) => {
@@ -234,6 +235,13 @@ const InvoiceForm: React.FC<Props> = ({
                     >
                         <Lucide.CheckCheck className="w-3.5 h-3.5" /> 視覺確認無誤
                     </button>
+                    {onDelete && (
+                        <button
+                            onClick={() => { if (window.confirm('確定要刪除此 OCR 辨識資料？刪除後可重新上傳檔案再次比對。')) onDelete(); }}
+                            className="p-1.5 hover:bg-rose-50 rounded-full text-rose-400 hover:text-rose-600 transition-colors"
+                            title="刪除 OCR 辨識資料，重新上傳比對"
+                        ><Lucide.Trash2 className="w-4 h-4" /></button>
+                    )}
                     <button onClick={onSave} className="bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex items-center gap-2 active:scale-95"><Lucide.Save className="w-3.5 h-3.5" /> 儲存</button>
                     {showCloseButton && onClose && (
                         <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400 transition-colors"><Lucide.X className="w-5 h-5" /></button>
