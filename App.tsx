@@ -672,8 +672,17 @@ const App: React.FC = () => {
             let auditStatus: 'MATCH' | 'MISMATCH' | 'MISSING_FILE' | 'EXTRA_FILE' = 'MATCH';
             let diffDetails: string[] = [];
 
-            // Flatten all OCR invoices from the matching files
-            const allOCRInvoices = matchingFiles.flatMap(f => f.data);
+            // Flatten all OCR invoices from the matching files, and deduplicate across files 
+            // (in case the same physical invoice was uploaded twice under different file names)
+            const rawAllOCRInvoices = matchingFiles.flatMap(f => f.data);
+            const allOCRInvoices = rawAllOCRInvoices.filter((inv, index, self) =>
+                index === self.findIndex(t =>
+                    // Only dedupe if it has an invoice number to compare, otherwise keep it (or let valid/invalid filtering handle it)
+                    t.invoice_number === inv.invoice_number &&
+                    t.invoice_number &&
+                    t.amount_total === inv.amount_total
+                ) || !inv.invoice_number // If no invoice number, don't blindly dedupe it here against other empty numbers
+            );
             let matchedOCRInvoices: InvoiceData[] = [];
 
             if (matchingFiles.length === 0) {
