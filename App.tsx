@@ -9,6 +9,7 @@ import ErrorReviewPage from './components/ErrorReviewPage';
 import CostDashboard from './components/CostDashboard';
 import * as Lucide from 'lucide-react';
 import * as XLSX from 'xlsx';
+import UTIF from 'utif';
 
 declare global {
     interface AIStudio {
@@ -340,14 +341,51 @@ const App: React.FC = () => {
             if (d.invoice_number) seenInvoiceNumbers.add(d.invoice_number.replace(/[\s-]/g, '').toUpperCase());
         }));
 
+        // Helper: Convert TIF to PNG using UTIF
+        const convertTifToPng = async (file: File): Promise<File> => {
+            const buffer = await file.arrayBuffer();
+            const ifds = UTIF.decode(buffer);
+            const firstPage = ifds[0];
+            UTIF.decodeImage(buffer, firstPage);
+            const rgba = UTIF.toRGBA8(firstPage);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = firstPage.width;
+            canvas.height = firstPage.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error("Could not get canvas context");
+
+            const imageData = new ImageData(new Uint8ClampedArray(rgba.buffer), firstPage.width, firstPage.height);
+            ctx.putImageData(imageData, 0, 0);
+
+            return new Promise((resolve) => {
+                canvas.toBlob((blob) => {
+                    if (!blob) throw new Error("Canvas toBlob failed");
+                    resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".png", { type: "image/png" }));
+                }, 'image/png');
+            });
+        };
+
         let nextInvoices = [...currentInvoices];
 
-        fileArray.forEach(file => {
-            const filename = file.name;
+        fileArray.forEach(async (file) => {
+            let processedFile = file;
+            const isTif = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
+
+            if (isTif) {
+                try {
+                    logger.info('IMAGE', `Converting TIF to PNG: ${file.name}`);
+                    processedFile = await convertTifToPng(file);
+                } catch (err) {
+                    logger.error('IMAGE', `Failed to convert TIF: ${file.name}`, err);
+                }
+            }
+
+            const filename = processedFile.name;
             const id = filename.substring(0, filename.lastIndexOf('.')) || filename;
 
             // Save to IndexedDB
-            fileStorageService.saveFile(id, file).catch(err => console.error("IDB Save Fail", err));
+            fileStorageService.saveFile(id, processedFile).catch(err => console.error("IDB Save Fail", err));
 
             if (existingMap.has(id)) {
                 // Re-upload existing
@@ -667,6 +705,8 @@ const App: React.FC = () => {
                 displayOCR = {
                     ...matchedOCRInvoices[0],
                     amount_total: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_total || 0), 0),
+                    amount_sales: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_sales || 0), 0),
+                    amount_tax: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_tax || 0), 0),
                     invoice_number: matchedOCRInvoices.map(i => i.invoice_number).join(' / ')
                 };
             }
@@ -719,9 +759,10 @@ const App: React.FC = () => {
     // --- Metrics Calculation ---
     const metrics = useMemo(() => {
         if (!project) return { accuracy: 0, duration: 0 };
-        const total = auditList.length;
-        const correct = auditList.filter(i => i.auditStatus === 'MATCH').length;
-        const accuracy = total > 0 ? (correct / total) * 100 : 0;
+        // Denominator: Only project items that have at least one file attached
+        const itemsWithFiles = auditList.filter(i => i.auditStatus !== 'MISSING_FILE');
+        const correct = itemsWithFiles.filter(i => i.auditStatus === 'MATCH').length;
+        const accuracy = itemsWithFiles.length > 0 ? (correct / itemsWithFiles.length) * 100 : 0;
         return { accuracy, duration: batchStats.totalDuration };
     }, [auditList, batchStats.totalDuration]);
 
@@ -762,7 +803,7 @@ const App: React.FC = () => {
             ].join(',');
         });
 
-        const csvContent = "\uFEFF" + [...summary, headers.join(','), ...rows].join('\n');
+        const csvContent = "\ufeff" + [...summary, headers.join(','), ...rows].join('\n');
 
         const link = document.createElement("a");
         link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);

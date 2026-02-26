@@ -2,7 +2,7 @@
 export interface LogEntry {
     timestamp: string;
     level: 'INFO' | 'WARN' | 'ERROR';
-    category: 'SYSTEM' | 'QUEUE' | 'API' | 'FILE' | 'PREPROCESSING';
+    category: 'SYSTEM' | 'QUEUE' | 'API' | 'FILE' | 'PREPROCESSING' | 'IMAGE';
     message: string;
     details?: any;
 }

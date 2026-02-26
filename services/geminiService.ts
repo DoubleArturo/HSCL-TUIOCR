@@ -22,9 +22,10 @@ Before extracting any data, classify the document type:
 1. **"Invoice"** - If the document contains the word "INVOICE" (English)
 2. **"進口報關"** - If the document contains "進口報單" or "海關" text
 3. **"統一發票"** - Standard Taiwan GUI (2 Letters + 8 Digits invoice number format)
-4. **"非發票"** - Anything else (e.g., Packing List, Receipt, Purchase Order)
+4. **"非發票"** - **Mandatory Exclusion**: Documents like "銷貨單" (Delivery Note), "出貨單", "Packing List", "出貨憑證", or "估價單". 
 
 **Rules**:
+- If a document is identified as "銷貨單", "出貨單", or "Packing List", it MUST be classified as "非發票", even if it contains "Invoice" text or resembles an invoice.
 - If both "Invoice" and "進口報關" appear → Output "Invoice"
 - If only "進口報關" appears → Output "進口報關"
 - If standard Taiwan GUI format → Output "統一發票"
@@ -172,7 +173,7 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       contents: {
         parts: [
           contentPart,
-          { text: "Extract all invoice data. If image is blurry or not an invoice, set 'error_code' accordingly." }
+          { text: "Extract all invoice data. If the document is a Delivery Note (銷貨單/出貨單) or Packing List, classify it as '非發票' and DO NOT extract invoice numbers or amounts. If image is blurry, set 'error_code' accordingly." }
         ]
       },
       config: {

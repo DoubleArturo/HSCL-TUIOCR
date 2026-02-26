@@ -65,11 +65,11 @@ const InvoiceForm: React.FC<Props> = ({
             return 'bg-rose-50 border-rose-500 ring-2 ring-rose-200 shadow-sm animate-pulse-once'; // Distinct Red for Error
         }
 
-        if (score >= 100) return 'bg-white border-gray-200 focus-within:border-indigo-500';
+        if (score >= 90) return 'bg-white border-gray-200 focus-within:border-indigo-500';
         const severity = getFieldSeverity(field);
-        if (severity === 'critical') return 'bg-rose-50 border-rose-400 ring-4 ring-rose-100 shadow-sm';
-        if (severity === 'warning') return 'bg-amber-50 border-amber-400 ring-4 ring-amber-100 shadow-sm';
-        return 'bg-slate-50 border-slate-400 ring-4 ring-slate-100 shadow-sm';
+        if (severity === 'critical') return 'bg-rose-50 border-rose-400 ring-2 ring-rose-100 shadow-sm';
+        if (severity === 'warning') return 'bg-amber-50 border-amber-300 ring-2 ring-amber-50 shadow-sm';
+        return 'bg-slate-50 border-slate-300 ring-2 ring-slate-50 shadow-sm';
     };
 
     const FieldHeader = ({ label, field, score }: { label: string, field: string, score: number }) => {
@@ -107,12 +107,12 @@ const InvoiceForm: React.FC<Props> = ({
                         </span>
                     ) : (
                         <div className="flex items-center gap-1.5" title={`AI Confidence: ${score}%`}>
-                            {score < 100 ? (
+                            {score < 90 ? (
                                 <span className={`text-[10px] font-bold ${score < 80 ? 'text-amber-600' : 'text-slate-400'}`}>
                                     {score}%
                                 </span>
                             ) : (
-                                // Verified / High Confidence: Minimalist Dot
+                                // High Confidence (>=90%): Minimalist Dot
                                 <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 opacity-50 group-hover/label:opacity-100 transition-opacity"></div>
                             )}
                         </div>
