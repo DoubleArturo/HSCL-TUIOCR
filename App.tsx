@@ -354,22 +354,37 @@ const App: React.FC = () => {
             if (d.invoice_number) seenInvoiceNumbers.add(d.invoice_number.replace(/[\s-]/g, '').toUpperCase());
         }));
 
-        // Helper: Convert TIF to PNG using UTIF
+        // Helper: Convert ALL pages of a TIF to one tall PNG (pages stacked vertically)
         const convertTifToPng = async (file: File): Promise<File> => {
             const buffer = await file.arrayBuffer();
             const ifds = UTIF.decode(buffer);
-            const firstPage = ifds[0];
-            UTIF.decodeImage(buffer, firstPage);
-            const rgba = UTIF.toRGBA8(firstPage);
+
+            // Decode all pages
+            ifds.forEach((ifd: any) => UTIF.decodeImage(buffer, ifd));
+
+            // Stitch all pages vertically onto one canvas
+            const totalWidth = Math.max(...ifds.map((p: any) => p.width as number));
+            const totalHeight = ifds.reduce((sum: number, p: any) => sum + (p.height as number), 0);
 
             const canvas = document.createElement('canvas');
-            canvas.width = firstPage.width;
-            canvas.height = firstPage.height;
+            canvas.width = totalWidth;
+            canvas.height = totalHeight;
             const ctx = canvas.getContext('2d');
             if (!ctx) throw new Error("Could not get canvas context");
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, totalWidth, totalHeight);
 
-            const imageData = new ImageData(new Uint8ClampedArray(rgba.buffer), firstPage.width, firstPage.height);
-            ctx.putImageData(imageData, 0, 0);
+            let yOffset = 0;
+            for (const page of ifds) {
+                const rgba = UTIF.toRGBA8(page);
+                const imgData = new ImageData(new Uint8ClampedArray(rgba.buffer), page.width, page.height);
+                const offscreen = document.createElement('canvas');
+                offscreen.width = page.width;
+                offscreen.height = page.height;
+                offscreen.getContext('2d')!.putImageData(imgData, 0, 0);
+                ctx.drawImage(offscreen, 0, yOffset);
+                yOffset += page.height;
+            }
 
             return new Promise((resolve) => {
                 canvas.toBlob((blob) => {
@@ -418,18 +433,18 @@ const App: React.FC = () => {
                     const entry: InvoiceEntry = {
                         ...existing,
                         file: processedFile,
-                        previewUrl: URL.createObjectURL(file),
+                        previewUrl: URL.createObjectURL(processedFile),
                         status: 'SUCCESS'
                     };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                 } else {
-                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(file), status: 'PENDING', data: [] };
+                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(processedFile), status: 'PENDING', data: [] };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                     newProcessQueue.push(entry);
                 }
             } else {
                 // Brand new
-                const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(file), status: 'PENDING', data: [] };
+                const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(processedFile), status: 'PENDING', data: [] };
                 nextInvoices.push(entry);
                 newProcessQueue.push(entry);
             }
