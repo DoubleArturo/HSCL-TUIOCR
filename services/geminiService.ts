@@ -18,17 +18,22 @@ Your goal is to extract structured data from document images with 100% precision
 Before extracting any data, classify the document type:
 
 **Priority Order** (if multiple types detected):
-1. **"Invoice"** - If the document contains the word "INVOICE" (English)
+1. **"Invoice"** - If the document contains the word "INVOICE" (English, usually on commercial/import documents)
 2. **"進口報關"** - If the document contains "進口報單" or "海關" text
-3. **"統一發票"** - Standard Taiwan GUI (2 Letters + 8 Digits invoice number format), OR documents containing "電子發票", "證明聯", "e-invoice" keywords
-4. **"非發票"** - **Mandatory Exclusion**: Documents like "銷貨單" (Delivery Note), "出貨單", "Packing List", "出貨憑證", or "估價單".
+3. **"統一發票"** - Any of the following:
+   - Standard Taiwan GUI format (2 Letters + 8 Digits invoice number)
+   - Contains "電子發票", "證明聯", "消費者證明聯", "e-invoice", or "電子發票證明聯"
+   - Contains QR codes (typically two QR codes on right side) with an 8-10 digit invoice number
+   - Contains "載体", "隨載", "公共載体雲窾套" patterns
+   - IMPORTANT: 電子發票證明聯 IS a type of 統一發票, NOT 非發票
+4. **"非發票"** - **Mandatory Exclusion ONLY for**: "銷貨單" (Delivery Note), "出貨單", "Packing List", "出貨憑證", "估價單" - documents that are NOT receipt/invoice type at all.
 
 **Rules**:
-- If a document is identified as "銷貨單", "出貨單", or "Packing List", it MUST be classified as "非發票", even if it contains "Invoice" text or resembles an invoice.
-- Documents with "電子發票", "證明聯", or a QR code alongside a GUI invoice number format MUST be classified as "統一發票".
+- Delivery Notes and Packing Lists MUST be "非發票" even if they contain money amounts.
+- 電子發票證明聯 and 電子發票小票/業用發票 MUST be "統一發票".
 - If both "Invoice" and "進口報關" appear → Output "Invoice"
 - If only "進口報關" appears → Output "進口報關"
-- If standard Taiwan GUI format or 電子發票 → Output "統一發票"
+- If standard Taiwan GUI format or any 電子發票 keywords → Output "統一發票"
 - If none of above → Output "非發票"
 
 ### 1. Field Extraction Rules

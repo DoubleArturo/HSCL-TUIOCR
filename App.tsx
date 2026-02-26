@@ -381,7 +381,7 @@ const App: React.FC = () => {
 
         let nextInvoices = [...currentInvoices];
 
-        fileArray.forEach(async (file) => {
+        for (const file of fileArray) {
             let processedFile = file;
             const isTif = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
 
@@ -395,40 +395,45 @@ const App: React.FC = () => {
             }
 
             const filename = processedFile.name;
-            const id = filename.substring(0, filename.lastIndexOf('.')) || filename;
+            let id = filename.substring(0, filename.lastIndexOf('.')) || filename;
+
+            // Disambiguate: if same base-name ID already taken by a DIFFERENT file (e.g. G61-Q10001.pdf vs G61-Q10001.jpg),
+            // append the extension so both get processed and prefix-matched to the same ERP row.
+            if (existingMap.has(id) || nextInvoices.some(n => n.id === id && n.file.name !== processedFile.name)) {
+                const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id);
+                if (existing && existing.file.name !== processedFile.name) {
+                    const ext = filename.split('.').pop()?.toLowerCase() || '';
+                    id = `${id}-${ext}`;
+                }
+            }
 
             // Save to IndexedDB
             fileStorageService.saveFile(id, processedFile).catch(err => console.error("IDB Save Fail", err));
 
-            if (existingMap.has(id)) {
+            if (existingMap.has(id) || nextInvoices.some(n => n.id === id)) {
                 // Re-upload existing
-                const existing = existingMap.get(id) as InvoiceEntry;
+                const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id)!;
 
-                // If it was successful, keep it unless user deletes it first.
-                // BUT if it was ERROR or PENDING, we re-try!
                 if (existing.status === 'SUCCESS' && existing.data.length > 0) {
-                    // Updating the file blob/preview in case standard local file reference was lost
-                    // The old entry might have a stale previewUrl or mock File object
                     const entry: InvoiceEntry = {
                         ...existing,
-                        file: file,
-                        previewUrl: URL.createObjectURL(file), // Refresh preview
+                        file: processedFile,
+                        previewUrl: URL.createObjectURL(file),
                         status: 'SUCCESS'
                     };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                 } else {
-                    // Retry failed or stuck items
-                    const entry: InvoiceEntry = { id, file, previewUrl: URL.createObjectURL(file), status: 'PENDING', data: [] };
+                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(file), status: 'PENDING', data: [] };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                     newProcessQueue.push(entry);
                 }
             } else {
                 // Brand new
-                const entry: InvoiceEntry = { id, file, previewUrl: URL.createObjectURL(file), status: 'PENDING', data: [] };
+                const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(file), status: 'PENDING', data: [] };
                 nextInvoices.push(entry);
                 newProcessQueue.push(entry);
             }
-        });
+        }
 
         // Update list to show "PENDING" state
         updateProjectInvoices(() => nextInvoices);
@@ -679,9 +684,10 @@ const App: React.FC = () => {
 
                 if (Math.abs(ocrTotalSum - erpTotal) > 1) diffDetails.push('amount');
 
-                // Validate Tax IDs for all matched invoices
+                // Validate Tax IDs for all matched invoices (skip for Invoice-type - they have no TW tax IDs)
                 const erpTaxId = erp.seller_tax_id || '';
                 matchedOCRInvoices.forEach(inv => {
+                    if (inv.document_type === 'Invoice') return; // Invoice type has no TW tax IDs
                     const ocrTaxId = inv.seller_tax_id || '';
                     if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId) {
                         if (!diffDetails.includes('tax_id')) diffDetails.push('tax_id');
