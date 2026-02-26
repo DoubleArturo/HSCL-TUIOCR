@@ -988,7 +988,7 @@ const App: React.FC = () => {
                             <button onClick={() => fileInputRef.current?.click()} className="btn-sm btn-indigo">
                                 <Lucide.Upload className="w-3.5 h-3.5" /> 上傳/補件 (OCR)
                             </button>
-                            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/png,image/jpeg,application/pdf" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
+                            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/png,image/jpeg,application/pdf,image/tiff,.tif,.tiff" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
 
                             <div className="h-4 w-px bg-gray-200 mx-1"></div>
 
