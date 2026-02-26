@@ -187,6 +187,20 @@ const InvoiceForm: React.FC<Props> = ({
 
     return (
         <div className="w-[450px] min-w-[450px] shrink-0 flex flex-col border-l border-gray-200 bg-white z-30 shadow-[-10px_0_30px_rgba(0,0,0,0.05)] h-full">
+            {/* 非發票 Warning Banner */}
+            {(formData.document_type === '非發票' || formData.error_code === 'NOT_INVOICE') && (
+                <div className="m-4 p-4 bg-amber-50 border-2 border-amber-400 rounded-xl flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                        <Lucide.AlertOctagon className="w-5 h-5 text-amber-600 shrink-0" />
+                        <span className="text-sm font-black text-amber-800">非發票文件 — 無需稽核</span>
+                    </div>
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                        此文件被 AI 辨識為<strong>訂單出貨憑證、銷貨單或 Packing List</strong>，不屬於統一發票範疇。<br />
+                        本次辨識已計算 Token 費用，但<strong>不進行資料擷取</strong>。<br />
+                        若判斷有誤，請手動修改「文件類型」欄位。
+                    </p>
+                </div>
+            )}
             <div className="p-4 border-b flex justify-between items-center bg-white sticky top-0 z-40 shadow-sm/50 shrink-0">
                 <div className="flex items-center gap-2">
                     <h2 className="text-lg font-black text-gray-900 tracking-tight">稽核編輯器</h2>

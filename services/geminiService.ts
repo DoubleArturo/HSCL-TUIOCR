@@ -22,7 +22,7 @@ Before extracting any data, classify the document type:
 2. **"進口報關"** - If the document contains "進口報單" or "海關" text
 3. **"統一發票"** - Any of the following:
    - Standard Taiwan GUI format (2 Letters + 8 Digits invoice number)
-   - Contains "電子發票", "證明聯", "消費者證明聯", "e-invoice", or "電子發票證明聯"
+   - Contains "電子發票", "證明聯", "e-invoice", or "電子發票證明聯"
    - Contains QR codes (typically two QR codes on right side) with an 8-10 digit invoice number
    - Contains "載体", "隨載", "公共載体雲窾套" patterns
    - IMPORTANT: 電子發票證明聯 IS a type of 統一發票, NOT 非發票
@@ -249,7 +249,7 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
         }
       }
 
-      // Rule 3: Validating Amounts
+      // Rule 3: Validating & Auto-Correcting Amounts (amount_total = amount_sales + amount_tax)
       const sales = item.amount_sales || 0;
       const tax = item.amount_tax || 0;
       const total = item.amount_total || 0;
@@ -262,9 +262,11 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
         logs.push(`Fixed: Swapped Total (${temp}) and Tax (${total})`);
       }
 
-      if (Math.abs((sales + tax) - item.amount_total) > 1) {
-        logs.push(`Rule 3: Amount Mismatch detected (Sales ${sales} + Tax ${tax} != Total ${item.amount_total})`);
-        item.verification.logic_is_valid = false;
+      const calculatedTotal = (item.amount_sales || 0) + (item.amount_tax || 0);
+      if (Math.abs((item.amount_total || 0) - calculatedTotal) > 1) {
+        logs.push(`Rule 3: Amount Mismatch - auto-correcting total from ${item.amount_total} to ${calculatedTotal}`);
+        item.amount_total = calculatedTotal;
+        item.verification.logic_is_valid = true; // We fixed it
       } else {
         logs.push(`Rule 3: Amount Logic Valid`);
       }
@@ -275,6 +277,29 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
 
     // Assign processed results back
     results = processedResults;
+
+    // --- Deduplicate ghost results (null invoice_number with same amount as a real result) ---
+    // Happens when multi-page TIFs include blank/carbon-copy pages that partially match real invoices
+    results = results.filter((item, index) => {
+      if (item.document_type === '非發票') {
+        // Keep 非發票 but mark as NOT_INVOICE for UI clarity
+        item.error_code = 'NOT_INVOICE' as any;
+        return true;
+      }
+      if (!item.invoice_number) {
+        // Ghost: has amounts but no invoice number — check if a real duplicate with same total exists
+        const hasBetterMatch = results.some((other, otherIdx) =>
+          otherIdx !== index &&
+          other.invoice_number &&
+          Math.abs((other.amount_total || 0) - (item.amount_total || 0)) <= 5
+        );
+        if (hasBetterMatch) {
+          console.log(`[Dedup] Dropping ghost result with null invoice_number, total=${item.amount_total}`);
+          return false;
+        }
+      }
+      return true;
+    });
 
     // --- Hybrid Auto-Escalation Logic ---
     // Only enabled if the user explicitly selected the Hybrid option (modelName incl. 'hybrid')
