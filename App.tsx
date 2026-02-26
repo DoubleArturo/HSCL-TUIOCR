@@ -681,28 +681,22 @@ const App: React.FC = () => {
             } else if (allOCRInvoices.length > 0) {
                 const erpInvNos = erp.invoice_numbers.map(n => n.replace(/[\s-]/g, '').toUpperCase());
 
-                // Find OCR invoices that match ERP numbers
+                // Find OCR invoices that match ERP numbers (must have non-empty invoice_number)
                 matchedOCRInvoices = allOCRInvoices.filter(inv => {
                     const ocrInvNo = (inv.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
+                    if (!ocrInvNo) return false; // Never match empty invoice numbers
+                    if (inv.document_type === '非發票' || inv.error_code === 'NOT_INVOICE') return false;
                     // Check if this OCR invoice matches ANY of the ERP numbers
                     return erpInvNos.some(erpNo => ocrInvNo.includes(erpNo) || erpNo.includes(ocrInvNo));
                 });
 
-                // If no direct number match, but we have exactly 1 ERP inv and 1 OCR inv, assume match
-                if (matchedOCRInvoices.length === 0 && erpInvNos.length === 1 && allOCRInvoices.length === 1) {
-                    matchedOCRInvoices = [allOCRInvoices[0]];
+                // If no direct number match, but we have exactly 1 ERP inv and 1 OCR inv (non-非発票), assume match
+                const validOCRInvoices = allOCRInvoices.filter(i => i.document_type !== '非發票' && i.error_code !== 'NOT_INVOICE');
+                if (matchedOCRInvoices.length === 0 && erpInvNos.length === 1 && validOCRInvoices.length === 1) {
+                    matchedOCRInvoices = [validOCRInvoices[0]];
                 }
 
-                if (matchedOCRInvoices.length > 0) {
-                    // Try to find the specific file that provided the matched invoice
-                    // Use the first matched invoice's parent file if possible.
-                    // But we flattened `allOCRInvoices` without keeping parent ref?
-                    // We need to know which file `matchedOCRInvoices[0]` belongs to.
-                    // Let's refactor the flatten logic slightly above? 
-                    // No, `matchingFiles` is small, we can just find it.
-                    // Actually, we can just store the file ID if we find a match.
-                }
-                // Compare Sums (ERP Total vs Sum of Matched OCR Totals)
+                // Compare Sums — only valid (non-非発票) invoices count
                 const erpTotal = erp.amount_total;
                 const ocrTotalSum = matchedOCRInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
 
