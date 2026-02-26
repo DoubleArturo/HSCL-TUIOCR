@@ -278,12 +278,21 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     // Assign processed results back
     results = processedResults;
 
-    // --- Deduplicate ghost results (null invoice_number with same amount as a real result) ---
-    // Happens when multi-page TIFs include blank/carbon-copy pages that partially match real invoices
+    // --- Deduplicate ghost results & filter mixed 非發票 ---
+    const hasValidInvoice = results.some(r => r.document_type !== '非發票' && r.invoice_number);
+
     results = results.filter((item, index) => {
       if (item.document_type === '非發票') {
-        // Keep 非發票 but mark as NOT_INVOICE for UI clarity
+        // If file contains a real invoice, drop this "非發票" page entirely (e.g., packing list attached to invoice)
+        if (hasValidInvoice) {
+          console.log(`[Dedup] Dropping 非發票 page because a valid invoice exists in the same file.`);
+          return false;
+        }
+        // Keep 非發票 but mark as NOT_INVOICE for UI clarity and ZERO out amounts
         item.error_code = 'NOT_INVOICE' as any;
+        item.amount_sales = 0;
+        item.amount_tax = 0;
+        item.amount_total = 0;
         return true;
       }
       if (!item.invoice_number) {
