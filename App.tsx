@@ -200,9 +200,22 @@ const App: React.FC = () => {
         setProject(prev => {
             if (!prev) return null;
             const updated = { ...prev, erpData: records };
-            // For ERP Upload, we can save immediately as it's a one-time big action
             setTimeout(() => saveProjectSnapshot(updated), 100);
             return updated;
+        });
+    };
+
+    const toggleErpFlag = (voucherId: string, invoiceNumbers: string[]) => {
+        setProject(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                erpData: prev.erpData.map(erp => {
+                    const isMatch = erp.voucher_id === voucherId &&
+                        erp.invoice_numbers.join(',') === invoiceNumbers.join(',');
+                    return isMatch ? { ...erp, erpFlagged: !erp.erpFlagged } : erp;
+                })
+            };
         });
     };
 
@@ -697,13 +710,19 @@ const App: React.FC = () => {
             // For display, we might pick the "first" matched invoice to show details, 
             // or sum them up. For now, let's use the first one but show sum in Amount.
             let displayOCR = null;
-            if (matchedOCRInvoices.length > 0) {
+            if (matchedOCRInvoices.length > 0) {                    // Filter out 非發票 items and null invoice numbers from the display concat
+                const validInvoices = matchedOCRInvoices.filter(i => i.document_type !== '非發票');
+                const invoiceNumbers = [...new Set(
+                    validInvoices
+                        .map(i => i.invoice_number?.replace(/[\s-]/g, '').toUpperCase())
+                        .filter(Boolean)
+                )].join(' / ');
                 displayOCR = {
                     ...matchedOCRInvoices[0],
                     amount_total: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_total || 0), 0),
                     amount_sales: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_sales || 0), 0),
                     amount_tax: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_tax || 0), 0),
-                    invoice_number: matchedOCRInvoices.map(i => i.invoice_number).join(' / ')
+                    invoice_number: invoiceNumbers
                 };
             } else if (allOCRInvoices.length > 0) {
                 // Fallback: no invoice number match, but file has OCR data - show it so user can see the discrepancy
@@ -1043,8 +1062,21 @@ const App: React.FC = () => {
                                         const hasOcrButNoFile = row.file && !row.file.previewUrl && row.file.status === 'SUCCESS';
 
                                         return (
-                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''}`}>
-                                                <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing ? 'text-slate-400' : 'text-slate-700'}`}>{row.id}{isExtra && <span className="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1 rounded">無 ERP</span>}</td>
+                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
+                                                <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing ? 'text-slate-400' : 'text-slate-700'}`}>
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span>{row.id}</span>
+                                                        {isExtra && <span className="text-[10px] bg-amber-100 text-amber-700 px-1 rounded">無 ERP</span>}
+                                                        {row.erp && (
+                                                            <button
+                                                                title={row.erp.erpFlagged ? 'ERP 已標注待確認，點擊取消' : '標注此 ERP 資料待確認'}
+                                                                onClick={() => toggleErpFlag(row.erp!.voucher_id, row.erp!.invoice_numbers)}
+                                                                className={`opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1 rounded ${row.erp.erpFlagged ? 'opacity-100 text-amber-600 bg-amber-100' : 'text-gray-400 hover:text-amber-500'}`}
+                                                            >🚩</button>
+                                                        )}
+                                                        {row.erp?.erpFlagged && <span className="text-[9px] text-amber-700 font-bold bg-amber-100 px-1 rounded">ERP 待確認</span>}
+                                                    </div>
+                                                </td>
                                                 <td className={`px-1 py-3 font-mono ${row.diffDetails.includes('inv_no') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-400' : 'text-slate-600')}`}>
                                                     {row.erp?.invoice_numbers.length ? (
                                                         <div className="flex flex-col">
@@ -1070,7 +1102,6 @@ const App: React.FC = () => {
                                                                     {row.ocr.document_type}
                                                                 </span>
                                                             )}
-                                                            {row.diffDetails.includes('buyer_id_error') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">買方錯誤</span>}
                                                             {row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
                                                             {row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">號碼錯誤</span>}
                                                             {row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
