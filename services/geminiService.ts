@@ -1,6 +1,5 @@
 import { GoogleGenAI, GenerateContentResponse, Part } from "@google/genai";
 import { InvoiceData } from "../types";
-import { validateTaxIdWithVision } from './visionService';
 
 // Define process for Vite environment to avoid TS errors
 declare const process: {
@@ -31,51 +30,18 @@ Before extracting any data, classify the document type:
 - If standard Taiwan GUI format → Output "統一發票"
 - If none of above → Output "非發票"
 
-### 1. Unified Business No. (Unifying/Buyer Tax ID) Priority
-- **CRITICAL**: The Buyer Tax ID (買方統編) is widely expected to be **"16547744"**.
-- If the handwritten or printed text looks remotely like "16547744" (e.g., "16547744", "I6547744", "16541744"), **OUTPUT "16547744"**.
-- Priority: If there is ambiguity, prefer "16547744" over other interpretations.
-
-### 1.1 Handwriting & Grid Handling (IMPORTANT)
-- **Ignore Grid Lines**: The document often contains **blue or printed grid boxes** for the Tax ID. Treat these vertical/horizontal lines as background noise.
-- **Focus on Ink**: Pay attention only to the **handwritten black/dark ink** inside the boxes.
-- **Do not read lines as '1' or 'I'**: Vertical separators \`| \` are NOT the digit 1.
-- **Layout**: If digits are separated by boxes (e.g., \`| 1 | 6 | 5 | \`), concatenate them into a single string "165".
-
-### 2. Field Extraction Rules
+### 1. Field Extraction Rules
 - **Invoice Number**: Must be 2 English Letters + 8 Digits (e.g., AB-12345678). Remove strict spaces.
 - **Date**: Normalize to YYYY-MM-DD. Handle ROC years (e.g., 113/05/01 -> 2024-05-01).
 - **Tax IDs**: Must be 8 digits.
 - **Orientation**: Auto-detect rotation. Identify the main invoice if multiple are present (e.g. A3 scan).
 
-### 3. Output Format
+### 2. Output Format
 Return ONLY valid JSON matching the schema.
 Confidence Scoring: For EACH field, assign a score (0-100).
 `;
 
-// Helper: Levenshtein Distance for Fuzzy Matching
-const levenshteinDistance = (a: string, b: string): number => {
-  const matrix = [];
-  for (let i = 0; i <= b.length; i++) { matrix[i] = [i]; }
-  for (let j = 0; j <= a.length; j++) { matrix[0][j] = j; }
 
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) == a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          Math.min(
-            matrix[i][j - 1] + 1,   // insertion
-            matrix[i - 1][j] + 1    // deletion
-          )
-        );
-      }
-    }
-  }
-  return matrix[b.length][a.length];
-};
 
 const invoiceObjectSchema = {
   type: "OBJECT",
@@ -88,7 +54,6 @@ const invoiceObjectSchema = {
     error_code: { type: "STRING", enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
     invoice_number: { type: "STRING" },
     invoice_date: { type: "STRING" },
-    buyer_tax_id: { type: "STRING", description: "The Tax ID of the Buyer (買方/買受人)" },
     seller_name: { type: "STRING" },
     seller_tax_id: { type: "STRING", description: "The Tax ID of the Seller (賣方). Use '?' for unclear digits." },
     amount_sales: { type: "INTEGER" },
@@ -109,14 +74,13 @@ const invoiceObjectSchema = {
       properties: {
         invoice_number: { type: "NUMBER" },
         invoice_date: { type: "NUMBER" },
-        buyer_tax_id: { type: "NUMBER" },
         seller_name: { type: "NUMBER" },
         seller_tax_id: { type: "NUMBER" },
         amount_sales: { type: "NUMBER" },
         amount_tax: { type: "NUMBER" },
         amount_total: { type: "NUMBER" }
       },
-      required: ["invoice_number", "invoice_date", "buyer_tax_id", "seller_name", "seller_tax_id", "amount_sales", "amount_tax", "amount_total"]
+      required: ["invoice_number", "invoice_date", "seller_name", "seller_tax_id", "amount_sales", "amount_tax", "amount_total"]
     },
     usage_metadata: {
       type: "OBJECT",
@@ -246,85 +210,6 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
             logs.push(`Enriched: Found Seller Tax ID from DB (${name} -> ${id})`);
             break;
           }
-        }
-      }
-
-      // B. Buyer Tax ID Validation & Fuzzy Auto-Correction
-      const EXPECTED_BUYER_ID = "16547744";
-      let needsVisionValidation = false;
-      let fuzzyMatchApplied = false;
-
-      if (item.buyer_tax_id) {
-        let cleanBuyerId = item.buyer_tax_id.replace(/\D/g, '');
-
-        // Exact Match
-        if (cleanBuyerId === EXPECTED_BUYER_ID) {
-          // Good, nothing to do
-        } else {
-          // Fuzzy Match: Check Levenshtein Distance
-          const dist = levenshteinDistance(cleanBuyerId, EXPECTED_BUYER_ID);
-          // If distance is small (<= 3) and length is somewhat similar, Auto-Correct
-          if (dist <= 3 && Math.abs(cleanBuyerId.length - EXPECTED_BUYER_ID.length) <= 1) {
-            const oldId = item.buyer_tax_id;
-            item.buyer_tax_id = EXPECTED_BUYER_ID;
-            cleanBuyerId = EXPECTED_BUYER_ID; // Update for verification check below
-            logs.push(`Auto-Correction: Fuzzy Match Fixed Buyer ID (${oldId} -> ${EXPECTED_BUYER_ID}, dist=${dist})`);
-            fuzzyMatchApplied = true;
-            needsVisionValidation = true; // Double-check with Vision API
-          } else {
-            // Real Error - definitely needs Vision validation
-            needsVisionValidation = true;
-            item.verification.flagged_fields.push('buyer_tax_id');
-            logs.push(`Validation Fail: Buyer ID is ${cleanBuyerId}, expected ${EXPECTED_BUYER_ID}`);
-          }
-        }
-      } else {
-        // Missing buyer tax ID - flag for Vision check
-        needsVisionValidation = true;
-        logs.push(`Buyer Tax ID missing - will attempt Vision API extraction`);
-      }
-
-      // B2. Vision API Cross-Validation (Phase 2 Enhancement)
-      if (needsVisionValidation) {
-        try {
-          logs.push(`[Vision API] Initiating cross-validation for Buyer Tax ID`);
-          const visionResult = await validateTaxIdWithVision(base64Data, EXPECTED_BUYER_ID, mimeType);
-
-          if (visionResult.extractedId) {
-            logs.push(`[Vision API] Extracted: ${visionResult.extractedId}, Confidence: ${visionResult.confidence}%`);
-
-            // Case 1: Vision API confirms Gemini's result
-            if (visionResult.extractedId === item.buyer_tax_id) {
-              logs.push(`[Vision API] Confirmed Gemini result: ${item.buyer_tax_id}`);
-              // Remove flag if both agree
-              if (fuzzyMatchApplied) {
-                const flagIndex = item.verification.flagged_fields.indexOf('buyer_tax_id');
-                if (flagIndex > -1) {
-                  item.verification.flagged_fields.splice(flagIndex, 1);
-                }
-              }
-            }
-            // Case 2: Vision API disagrees - prefer Vision for handwriting
-            else {
-              const oldValue = item.buyer_tax_id;
-              item.buyer_tax_id = visionResult.extractedId;
-              logs.push(`[Vision API] Corrected Buyer ID: ${oldValue} -> ${visionResult.extractedId}`);
-
-              // If Vision API result matches expected, remove flag
-              if (visionResult.extractedId === EXPECTED_BUYER_ID) {
-                const flagIndex = item.verification.flagged_fields.indexOf('buyer_tax_id');
-                if (flagIndex > -1) {
-                  item.verification.flagged_fields.splice(flagIndex, 1);
-                }
-              }
-            }
-          } else {
-            logs.push(`[Vision API] Could not extract Buyer Tax ID`);
-          }
-        } catch (visionError: any) {
-          // Vision API failed - keep Gemini result
-          logs.push(`[Vision API] Error: ${visionError.message || 'Unknown error'}`);
-          console.warn('[Vision API] Validation failed, using Gemini result:', visionError);
         }
       }
 

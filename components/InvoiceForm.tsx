@@ -123,21 +123,10 @@ const InvoiceForm: React.FC<Props> = ({
     };
 
     // Quick Fix Handler
-    const handleQuickFixTaxId = () => {
-        const updated = { ...formData };
-        updated.buyer_tax_id = '16547744';
-
-        // Remove 'buyer_tax_id' from flagged_fields
-        if (updated.verification?.flagged_fields) {
-            updated.verification.flagged_fields = updated.verification.flagged_fields.filter(f => f !== 'buyer_tax_id');
-        }
-        setFormData(updated);
-    };
 
     const errorSummary = [];
     if (!formData.manually_verified) {
         if (!formData.verification.logic_is_valid) errorSummary.push('金額勾稽錯誤');
-        if (formData.verification.flagged_fields?.includes('buyer_tax_id')) errorSummary.push('買方統編錯誤');
         if (formData.verification.flagged_fields?.includes('seller_tax_id')) errorSummary.push('賣方統編異常');
         if (formData.verification.flagged_fields?.includes('invoice_number')) errorSummary.push('發票號碼格式異常');
     }
@@ -253,25 +242,9 @@ const InvoiceForm: React.FC<Props> = ({
                 <div className="space-y-4">
                     <div><FieldHeader label="發票號碼" field="invoice_number" score={formData.field_confidence.invoice_number} /><input type="text" className={`w-full border rounded-xl px-3 py-2 font-mono text-lg font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_number, 'invoice_number')}`} value={formData.invoice_number || ''} onChange={(e) => handleChange('invoice_number', e.target.value)} /></div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div><FieldHeader label="開立日期" field="invoice_date" score={formData.field_confidence.invoice_date} /><input type="date" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_date, 'invoice_date')}`} value={formData.invoice_date || ''} onChange={(e) => handleChange('invoice_date', e.target.value)} /></div>
-                        <div>
-                            <FieldHeader label="買方統編" field="buyer_tax_id" score={formData.field_confidence.buyer_tax_id || 0} />
-                            <div className="relative">
-                                <input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${(formData.buyer_tax_id === '16547744') ? 'border-emerald-300 bg-emerald-50' : getFieldContainerStyle(formData.field_confidence.buyer_tax_id || 0, 'buyer_tax_id')}`} value={formData.buyer_tax_id || ''} onChange={(e) => handleChange('buyer_tax_id', e.target.value)} />
-                                {formData.buyer_tax_id !== '16547744' && (
-                                    <div className="mt-1 flex flex-col gap-1">
-                                        <p className="text-[9px] text-rose-600 font-bold flex items-center gap-1"><Lucide.XCircle className="w-3 h-3" /> 錯誤：非 16547744</p>
-                                        <button
-                                            onClick={handleQuickFixTaxId}
-                                            className="bg-emerald-100 hover:bg-emerald-200 text-emerald-700 text-[10px] font-bold py-1 px-2 rounded-lg flex items-center gap-1 transition-colors w-fit border border-emerald-200"
-                                        >
-                                            <Lucide.Check className="w-3 h-3" /> 系統誤判？(改為16547744)
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
+                    <div>
+                        <FieldHeader label="開立日期" field="invoice_date" score={formData.field_confidence.invoice_date} />
+                        <input type="date" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_date, 'invoice_date')}`} value={formData.invoice_date || ''} onChange={(e) => handleChange('invoice_date', e.target.value)} />
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">

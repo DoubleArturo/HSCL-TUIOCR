@@ -673,10 +673,6 @@ const App: React.FC = () => {
                     if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId) {
                         if (!diffDetails.includes('tax_id')) diffDetails.push('tax_id');
                     }
-                    const ocrBuyerId = inv.buyer_tax_id || '';
-                    if (ocrBuyerId !== BUYER_TAX_ID_REQUIRED) {
-                        if (!diffDetails.includes('buyer_id_error')) diffDetails.push('buyer_id_error');
-                    }
                     if (ocrTaxId.includes('?')) {
                         if (!diffDetails.includes('tax_id_unclear')) diffDetails.push('tax_id_unclear');
                     }
@@ -709,6 +705,9 @@ const App: React.FC = () => {
                     amount_tax: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_tax || 0), 0),
                     invoice_number: matchedOCRInvoices.map(i => i.invoice_number).join(' / ')
                 };
+            } else if (allOCRInvoices.length > 0) {
+                // Fallback: no invoice number match, but file has OCR data - show it so user can see the discrepancy
+                displayOCR = { ...allOCRInvoices[0] };
             }
 
             // Determine the "Primary" matched file for this specific row (if any)
