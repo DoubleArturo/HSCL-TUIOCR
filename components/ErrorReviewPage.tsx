@@ -14,7 +14,7 @@ interface Props {
 }
 
 // Error category types
-type ErrorCategory = 'all' | 'buyer_tax_id' | 'amount_logic' | 'seller_tax_id' | 'erp_mismatch' | 'other';
+type ErrorCategory = 'all' | 'amount_logic' | 'seller_tax_id' | 'other';
 
 interface ErrorItem {
     entry: InvoiceEntry;
@@ -34,10 +34,8 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
         const list: ErrorItem[] = [];
         const counts: Record<ErrorCategory, number> = {
             all: 0,
-            buyer_tax_id: 0,
             amount_logic: 0,
             seller_tax_id: 0,
-            erp_mismatch: 0,
             other: 0
         };
 
@@ -51,46 +49,29 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
                     const categories: ErrorCategory[] = [];
                     const reasons: string[] = [];
 
-                    // 1. Buyer Tax ID Error (Strict Value Check)
-                    if (inv.buyer_tax_id !== '16547744') {
-                        categories.push('buyer_tax_id');
-                        if (!reasons.includes('買方統編錯誤')) reasons.push('買方統編錯誤');
-                        counts.buyer_tax_id++;
-                    }
-
-                    // 2. Amount Logic Error (Intrinsic)
+                    // 1. Amount Logic Error (Intrinsic)
                     if (!inv.verification?.logic_is_valid) {
                         categories.push('amount_logic');
-                        if (!reasons.includes('金額勾稽錯誤')) reasons.push('金額勾稽錯誤');
+                        if (!reasons.includes('金額勾稽错誤')) reasons.push('金額勾稽错誤');
                         counts.amount_logic++;
                     }
 
-                    // 3. Seller Tax ID Intrinsic Issues
+                    // 2. Seller Tax ID Intrinsic Issues
                     if (inv.seller_tax_id && (inv.seller_tax_id.includes('?') || inv.seller_tax_id === 'NOT_FOUND')) {
                         categories.push('seller_tax_id');
                         if (!reasons.includes('賣方統編不清')) reasons.push('賣方統編不清');
                         counts.seller_tax_id++;
                     }
 
-                    // 4. ERP Mismatches (From AuditRow)
-                    // Only apply if this file is actually part of the mismatch determination. 
-                    // Usually safe to assume if the row is MISMATCH, the invoices in it are suspect.
+                    // 3. ERP Amount Mismatch
                     if (row.auditStatus === 'MISMATCH') {
                         if (row.diffDetails.includes('amount')) {
-                            categories.push('erp_mismatch');
+                            categories.push('amount_logic');
                             if (!reasons.includes('ERP金額不符')) reasons.push('ERP金額不符');
-                            counts.erp_mismatch++;
                         }
                         if (row.diffDetails.includes('tax_id')) {
-                            categories.push('erp_mismatch');
+                            categories.push('seller_tax_id');
                             if (!reasons.includes('ERP賣方統編不符')) reasons.push('ERP賣方統編不符');
-                            counts.erp_mismatch++;
-                        }
-                        if (row.diffDetails.includes('buyer_id_error')) {
-                            // Already handled by intrinsic check usually, but if intrinsic passed and this failed? 
-                            // (Unlikely if logic is synced, but safe to add)
-                            if (!categories.includes('buyer_tax_id')) categories.push('buyer_tax_id');
-                            if (!reasons.includes('買方統編錯誤')) reasons.push('買方統編錯誤 (ERP要求)');
                         }
                     }
 
@@ -241,10 +222,8 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
                                 className="w-full appearance-none bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-lg py-2 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
                             >
                                 <option value="all">全部異常 ({categoryCounts.all})</option>
-                                <option value="buyer_tax_id">買方統編錯誤 ({categoryCounts.buyer_tax_id})</option>
                                 <option value="amount_logic">金額勾稽錯誤 ({categoryCounts.amount_logic})</option>
                                 <option value="seller_tax_id">賣方統編不清 ({categoryCounts.seller_tax_id})</option>
-                                <option value="erp_mismatch">ERP 比對異常 ({categoryCounts.erp_mismatch})</option>
                                 <option value="other">其他 ({categoryCounts.other})</option>
                             </select>
                             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">

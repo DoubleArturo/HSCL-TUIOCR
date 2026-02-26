@@ -742,15 +742,16 @@ const App: React.FC = () => {
                         .filter(Boolean)
                 )].join(' / ');
                 displayOCR = {
-                    ...matchedOCRInvoices[0],
-                    amount_total: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_total || 0), 0),
-                    amount_sales: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_sales || 0), 0),
-                    amount_tax: matchedOCRInvoices.reduce((sum, i) => sum + (i.amount_tax || 0), 0),
+                    ...(validInvoices[0] || matchedOCRInvoices[0]),
+                    amount_total: validInvoices.reduce((sum, i) => sum + (i.amount_total || 0), 0),
+                    amount_sales: validInvoices.reduce((sum, i) => sum + (i.amount_sales || 0), 0),
+                    amount_tax: validInvoices.reduce((sum, i) => sum + (i.amount_tax || 0), 0),
                     invoice_number: invoiceNumbers
                 };
             } else if (allOCRInvoices.length > 0) {
-                // Fallback: no invoice number match, but file has OCR data - show it so user can see the discrepancy
-                displayOCR = { ...allOCRInvoices[0] };
+                // Fallback: no number match — show first non-非發票 item so user can see the discrepancy
+                const fallbackInv = allOCRInvoices.find(i => i.document_type !== '非發票') || allOCRInvoices[0];
+                displayOCR = { ...fallbackInv };
             }
 
             // Determine the "Primary" matched file for this specific row (if any)
