@@ -1,5 +1,5 @@
 import { GoogleGenAI, GenerateContentResponse, Part } from "@google/genai";
-import { InvoiceData } from "../types";
+import { InvoiceData, ExpectedERP } from "../types";
 
 // Define process for Vite environment to avoid TS errors
 declare const process: {
@@ -110,7 +110,7 @@ const responseSchema = {
 // 輔助函式：等待
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const analyzeInvoice = async (base64Data: string, mimeType: string, modelName: string = 'gemini-1.5-flash', retryCount = 0, knownSellers: Record<string, string> = {}): Promise<InvoiceData[]> => {
+export const analyzeInvoice = async (base64Data: string, mimeType: string, modelName: string = 'gemini-1.5-flash', retryCount = 0, knownSellers: Record<string, string> = {}, expectedERP?: ExpectedERP, validationRetryCount = 0): Promise<InvoiceData[]> => {
   // Support both process.env.GEMINI_API_KEY (User instruction) and process.env.API_KEY (System standard)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
 
@@ -138,12 +138,28 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     console.log("SystemInstruction (Type):", typeof SYSTEM_INSTRUCTION);
 
 
+    let promptText = "Extract all invoice data. IMPORTANT: If the document contains MULTIPLE physical invoices (e.g. top and bottom halves, multiple stapled pages, or multiple invoice numbers), return EACH invoice as a SEPARATE object in the JSON array - do NOT merge them. If the document is a Delivery Note (銷貨單/出貨單) or Packing List, classify it as '非發票' and DO NOT extract invoice numbers or amounts. If image is blurry, set 'error_code' accordingly.";
+
+    if (expectedERP && (expectedERP.amount_total !== undefined || expectedERP.amount_sales !== undefined || expectedERP.amount_tax !== undefined)) {
+      promptText += `\n\n[CROSS-CHECK REQUIRED]: The ERP system expects the following total amounts for this document:\n`;
+      if (expectedERP.amount_total !== undefined) promptText += `- 總金額 (Total Amount): ${expectedERP.amount_total}\n`;
+      if (expectedERP.amount_sales !== undefined) promptText += `- 銷售額合計 (Sales Amount): ${expectedERP.amount_sales}\n`;
+      if (expectedERP.amount_tax !== undefined) promptText += `- 營業稅 (Tax Amount): ${expectedERP.amount_tax}\n`;
+      promptText += `\nIf your initial extraction DOES NOT match these expected ERP totals, you MUST re-examine the image carefully.\n`;
+      promptText += `Do NOT just blindly trust the addition logic. You MUST visually compare the numbers on the invoice with the ERP numbers provided above.\n`;
+      promptText += `Cross-check specifically: 1. "營業稅" (Tax), 2. "銷售額合計" (Sales), 3. "總金額" (Total).\n`;
+      promptText += `Identify which specific data point is wrong in your extraction, and correct it before returning the final JSON.\n`;
+      if (validationRetryCount > 0) {
+        promptText += `\nNOTE: This is retry attempt ${validationRetryCount}/3. Previous extraction failed ERP validation. Look closer!\n`;
+      }
+    }
+
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: effectiveModel, // Use the real model name (stripped of hybrid suffix)
       contents: {
         parts: [
           contentPart,
-          { text: "Extract all invoice data. IMPORTANT: If the document contains MULTIPLE physical invoices (e.g. top and bottom halves, multiple stapled pages, or multiple invoice numbers), return EACH invoice as a SEPARATE object in the JSON array - do NOT merge them. If the document is a Delivery Note (銷貨單/出貨單) or Packing List, classify it as '非發票' and DO NOT extract invoice numbers or amounts. If image is blurry, set 'error_code' accordingly." }
+          { text: promptText }
         ]
       },
       config: {
@@ -329,6 +345,48 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
         return proResults.map(item => {
           const escalationLog = `[System] Auto-escalated from Hybrid Flash to Pro due to validation failure.`;
           item.trace_logs = [escalationLog, ...(item.trace_logs || [])];
+          return item;
+        });
+      }
+    }
+
+    // --- ERP Crosscheck Validation Retry Logic ---
+    if (expectedERP && validationRetryCount < 3) {
+      // Only check amounts against valid invoices
+      const validInvoices = results.filter(r => r.document_type !== '非發票' && r.error_code !== 'NOT_INVOICE');
+
+      const ocrTotalSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
+      const ocrSalesSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_sales || 0), 0);
+      const ocrTaxSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax || 0), 0);
+
+      let hasMismatch = false;
+      const mismatchLogs = [];
+
+      if (expectedERP.amount_total !== undefined && expectedERP.amount_total !== 0 && Math.abs(ocrTotalSum - expectedERP.amount_total) > 1) {
+        hasMismatch = true;
+        mismatchLogs.push(`Total mismatch (OCR: ${ocrTotalSum}, ERP: ${expectedERP.amount_total})`);
+      }
+      if (expectedERP.amount_sales !== undefined && expectedERP.amount_sales !== 0 && Math.abs(ocrSalesSum - expectedERP.amount_sales) > 1) {
+        hasMismatch = true;
+        mismatchLogs.push(`Sales mismatch (OCR: ${ocrSalesSum}, ERP: ${expectedERP.amount_sales})`);
+      }
+      if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1) {
+        hasMismatch = true;
+        mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
+      }
+
+      if (hasMismatch) {
+        console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/3...`);
+        // Escalate to gemini-2.5-pro if we've failed already and aren't using it yet
+        const nextModel = (validationRetryCount >= 1 && !modelName.includes('pro')) ? 'gemini-2.5-pro' : modelName;
+
+        // Recursive call with incremented validationRetryCount
+        const retryResults = await analyzeInvoice(base64Data, mimeType, nextModel, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
+
+        // Prepend escalation log to trace_logs
+        return retryResults.map(item => {
+          const log = `[System] Retried (Attempt ${validationRetryCount + 1}) due to ERP mismatch: ${mismatchLogs.join(', ')}.`;
+          item.trace_logs = [log, ...(item.trace_logs || [])];
           return item;
         });
       }

@@ -433,18 +433,18 @@ const App: React.FC = () => {
                     const entry: InvoiceEntry = {
                         ...existing,
                         file: processedFile,
-                        previewUrl: URL.createObjectURL(processedFile),
+                        previewUrl: '', // URL.createObjectURL(processedFile), // 針對 4000 筆測試，先關閉預覽圖生成以防記憶體崩潰
                         status: 'SUCCESS'
                     };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                 } else {
-                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(processedFile), status: 'PENDING', data: [] };
+                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl: '', status: 'PENDING', data: [] };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                     newProcessQueue.push(entry);
                 }
             } else {
                 // Brand new
-                const entry: InvoiceEntry = { id, file: processedFile, previewUrl: URL.createObjectURL(processedFile), status: 'PENDING', data: [] };
+                const entry: InvoiceEntry = { id, file: processedFile, previewUrl: '', status: 'PENDING', data: [] };
                 nextInvoices.push(entry);
                 newProcessQueue.push(entry);
             }
@@ -468,7 +468,7 @@ const App: React.FC = () => {
         logger.info('QUEUE', `Batch started with ${totalItems} new items using model: ${selectedModel}`, { fileNames: newProcessQueue.map(i => i.id) });
         setProgress({ current: 0, total: totalItems, status: 'PROCESSING' });
 
-        const CONCURRENCY_LIMIT = 20;
+        const CONCURRENCY_LIMIT = 2; // 單次測試：從 20 降至 2，避免觸發 429 Error
         const changesMap = new Map<string, Partial<InvoiceEntry>>();
 
         // Start the batch updater interval
@@ -529,8 +529,24 @@ const App: React.FC = () => {
                 // Log start time for this specific item
                 const startTime = Date.now();
 
+                // Find matching ERP record for cross-validation
+                let expectedERP = undefined;
+                if (project && project.erpData) {
+                    const matchingErp = project.erpData.find(erp =>
+                        item.id === erp.voucher_id || item.id.startsWith(erp.voucher_id + '-') || item.id.startsWith(erp.voucher_id + '_')
+                    );
+                    if (matchingErp) {
+                        expectedERP = {
+                            amount_total: matchingErp.amount_total,
+                            amount_sales: matchingErp.amount_sales,
+                            amount_tax: matchingErp.amount_tax,
+                            invoice_numbers: matchingErp.invoice_numbers
+                        };
+                    }
+                }
+
                 // Pass the Excel-derived seller map to the AI service
-                const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellersFromExcel);
+                const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellersFromExcel, expectedERP);
 
                 if (results && results.length > 0) {
 
@@ -576,6 +592,10 @@ const App: React.FC = () => {
             const item = queue.shift();
             if (item) {
                 await processItem(item);
+
+                // 強制延遲 4 秒，稀釋 API 請求頻率
+                await new Promise(resolve => setTimeout(resolve, 4000));
+
                 // After finishing one, try to pick up another
                 if (queue.length > 0) await processNext();
             }
@@ -1006,6 +1026,7 @@ const App: React.FC = () => {
                                 <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
                                 <option value="gemini-2.5-flash-hybrid">✨ Hybrid Auto-Escalation</option>
                                 <option value="gemini-2.5-pro">Gemini 2.5 Pro (Accuracy)</option>
+                                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (高頻輕量)</option>
                             </select>
                             <div className="h-4 w-px bg-gray-200 mx-1"></div>
                             <button onClick={() => erpInputRef.current?.click()} className="btn-sm btn-blue">

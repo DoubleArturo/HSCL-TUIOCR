@@ -59,6 +59,13 @@ export interface InvoiceEntry {
   error?: string;
 }
 
+export interface ExpectedERP {
+  amount_total?: number;
+  amount_sales?: number;
+  amount_tax?: number;
+  invoice_numbers?: string[];
+}
+
 export interface ERPRecord {
   voucher_id: string;      // 帳款單號 (Key)
   invoice_date: string;    // 發票日期
