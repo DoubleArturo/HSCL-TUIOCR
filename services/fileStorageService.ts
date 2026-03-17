@@ -67,9 +67,9 @@ export const fileStorageService = {
 
     /**
      * Delete files older than maxAgeMs
-     * Default: 1 day (24 * 60 * 60 * 1000)
+     * Default: 30 days (30 * 24 * 60 * 60 * 1000)
      */
-    async pruneOldFiles(maxAgeMs: number = 24 * 60 * 60 * 1000): Promise<number> {
+    async pruneOldFiles(maxAgeMs: number = 30 * 24 * 60 * 60 * 1000): Promise<number> {
         const db = await this.openDB();
         return new Promise((resolve, reject) => {
             const transaction = db.transaction([STORE_NAME], 'readwrite');

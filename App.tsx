@@ -55,8 +55,8 @@ const App: React.FC = () => {
 
     // Cleanup old files on startup & Setup Auto-Save
     useEffect(() => {
-        // Prune files older than 24 hours (configurable)
-        fileStorageService.pruneOldFiles(24 * 60 * 60 * 1000).then(count => {
+        // Prune files older than 30 days (extended from 24h)
+        fileStorageService.pruneOldFiles(30 * 24 * 60 * 60 * 1000).then(count => {
             if (count > 0) console.log(`Cleaned up ${count} old temporary files`);
         });
 
@@ -396,6 +396,12 @@ const App: React.FC = () => {
 
         let nextInvoices = [...currentInvoices];
 
+        // Threshold for performance: only generate previews automatically if batch size < 100
+        const shouldGeneratePreview = fileArray.length < 100;
+        if (!shouldGeneratePreview) {
+            logger.warn('SYSTEM', `Batch size (${fileArray.length}) is large. Auto-previews disabled to save memory.`);
+        }
+
         for (const file of fileArray) {
             let processedFile = file;
             const isTif = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
@@ -412,8 +418,6 @@ const App: React.FC = () => {
             const filename = processedFile.name;
             let id = filename.substring(0, filename.lastIndexOf('.')) || filename;
 
-            // Disambiguate: if same base-name ID already taken by a DIFFERENT file (e.g. G61-Q10001.pdf vs G61-Q10001.jpg),
-            // append the extension so both get processed and prefix-matched to the same ERP row.
             if (existingMap.has(id) || nextInvoices.some(n => n.id === id && n.file.name !== processedFile.name)) {
                 const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id);
                 if (existing && existing.file.name !== processedFile.name) {
@@ -425,26 +429,26 @@ const App: React.FC = () => {
             // Save to IndexedDB
             fileStorageService.saveFile(id, processedFile).catch(err => console.error("IDB Save Fail", err));
 
+            const previewUrl = shouldGeneratePreview ? URL.createObjectURL(processedFile) : '';
+
             if (existingMap.has(id) || nextInvoices.some(n => n.id === id)) {
-                // Re-upload existing
                 const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id)!;
 
                 if (existing.status === 'SUCCESS' && existing.data.length > 0) {
                     const entry: InvoiceEntry = {
                         ...existing,
                         file: processedFile,
-                        previewUrl: '', // URL.createObjectURL(processedFile), // 針對 4000 筆測試，先關閉預覽圖生成以防記憶體崩潰
+                        previewUrl: previewUrl,
                         status: 'SUCCESS'
                     };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                 } else {
-                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl: '', status: 'PENDING', data: [] };
+                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl, status: 'PENDING', data: [] };
                     nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
                     newProcessQueue.push(entry);
                 }
             } else {
-                // Brand new
-                const entry: InvoiceEntry = { id, file: processedFile, previewUrl: '', status: 'PENDING', data: [] };
+                const entry: InvoiceEntry = { id, file: processedFile, previewUrl, status: 'PENDING', data: [] };
                 nextInvoices.push(entry);
                 newProcessQueue.push(entry);
             }
