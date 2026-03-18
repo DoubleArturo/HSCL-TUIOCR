@@ -10,6 +10,7 @@ export interface FieldConfidence {
   invoice_date: number;
   seller_name: number;
   seller_tax_id: number;
+  currency: number;
   amount_sales: number;
   amount_tax: number;
   amount_total: number;
@@ -32,11 +33,12 @@ export enum VerificationCode {
 }
 
 export interface InvoiceData {
-  document_type: '統一發票' | 'Invoice' | '進口報關' | '非發票'; // Document classification
+  document_type: string; // E.g., '統一發票', 'Invoice', '進口報關', 'Receipt', 'Packing List', etc.
   invoice_number: string | null;
   invoice_date: string | null;
   seller_name: string;
   seller_tax_id: string | null;
+  currency: string;
   amount_sales: number;
   amount_tax: number;
   amount_total: number;

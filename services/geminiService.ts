@@ -15,32 +15,21 @@ You are an expert OCR system for Taiwanese Unified Invoices (GUI) and related bu
 Your goal is to extract structured data from document images with 100% precision.
 
 ### 0. Document Type Classification (CRITICAL - First Step)
-Before extracting any data, classify the document type:
+Examine the document to determine its exact type. DO NOT just output generic classifications. Extract the exact document type as a string based on what is printed:
 
-**Priority Order** (if multiple types detected):
-1. **"Invoice"** - If the document contains the word "INVOICE" (English, usually on commercial/import documents)
-2. **"進口報關"** - If the document contains "進口報單" or "海關" text
-3. **"統一發票"** - Any of the following:
-   - Standard Taiwan GUI format (2 Letters + 8 Digits invoice number)
-   - Contains "電子發票", "證明聯", "e-invoice", or "電子發票證明聯"
-   - Contains QR codes (typically two QR codes on right side) with an 8-10 digit invoice number
-   - Contains "載体", "隨載", "公共載体雲窾套" patterns
-   - IMPORTANT: 電子發票證明聯 IS a type of 統一發票, NOT 非發票
-4. **"非發票"** - **Mandatory Exclusion ONLY for**: "銷貨單" (Delivery Note), "出貨單", "Packing List", "出貨憑證", "估價單" - documents that are NOT receipt/invoice type at all.
-
-**Rules**:
-- Delivery Notes and Packing Lists MUST be "非發票" even if they contain money amounts.
-- 電子發票證明聯 and 電子發票小票/業用發票 MUST be "統一發票".
-- If both "Invoice" and "進口報關" appear → Output "Invoice"
-- If only "進口報關" appears → Output "進口報關"
-- If standard Taiwan GUI format or any 電子發票 keywords → Output "統一發票"
-- If none of above → Output "非發票"
+**Guidelines**:
+1. **"統一發票"** - If it is a standard Taiwan GUI (e.g. 2 Letters + 8 Digits, has "電子發票證明聯", QR codes, "載具"). ALWAYS output exactly "統一發票".
+2. **"進口報單" or "海關進口快遞貨物稅費繳納證明"** - Output exactly what the document states.
+3. **Specific Document Names** - Provide the exact name: "Invoice", "Commercial Invoice", "Receipt", "Debit Note", etc.
+4. **"非發票" (Delivery Notes / Packing Lists)** - If it is a "銷貨單", "出貨單", "Packing List", "出貨憑證", "估價單" (documents without finalized tax/sales amounts or are just delivery proofs), output exactly "Packing List" or "Delivery Note". 
 
 ### 1. Field Extraction Rules
-- **Invoice Number**: Must be 2 English Letters + 8 Digits (e.g., AB-12345678). Remove strict spaces.
-- **Date**: Normalize to YYYY-MM-DD. Handle ROC years (e.g., 113/05/01 -> 2024-05-01).
-- **Tax IDs**: Must be 8 digits.
-- **Orientation**: Auto-detect rotation. Identify the main invoice if multiple are present (e.g. A3 scan).
+- **Currency**: Extract the currency code (e.g., TWD, USD, EUR, JPY, CNY). If no currency is explicitly listed or context clearly implies NT$, output "TWD".
+- **Invoice Number**: For standard GUI, must be 2 English Letters + 8 Digits. Remove spaces. For others, extract the exact number.
+- **Amounts**: You MUST output the exact numbers printed on the image. 
+- **CRITICAL ZERO RULE FOR AMOUNTS**: If a specific monetary value (e.g. Sales Amount, Tax Amount) is NOT visibly printed on the document, YOU MUST OUTPUT 0. Under NO CIRCUMSTANCES should you hallucinate numbers or invent taxes if they are not explicitly printed. DO NOT calculate numbers that are not there to "balance" an equation.
+- **Date**: Normalize to YYYY-MM-DD. Handle ROC years.
+- **Tax IDs**: Must be 8 digits for Taiwan companies.
 
 ### 2. Output Format
 Return ONLY valid JSON matching the schema.
@@ -54,14 +43,14 @@ const invoiceObjectSchema = {
   properties: {
     document_type: {
       type: "STRING",
-      enum: ["統一發票", "Invoice", "進口報關", "非發票"],
-      description: "Document classification. Priority: Invoice > 進口報關 > 統一發票 > 非發票"
+      description: "Exact document classification. e.g. '統一發票', 'Commercial Invoice', 'Receipt', '進口報單', 'Packing List', etc."
     },
     error_code: { type: "STRING", enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
     invoice_number: { type: "STRING" },
     invoice_date: { type: "STRING" },
     seller_name: { type: "STRING" },
     seller_tax_id: { type: "STRING", description: "The Tax ID of the Seller (賣方). Use '?' for unclear digits." },
+    currency: { type: "STRING", description: "Currency of the amounts (e.g., TWD, USD, EUR). Default to TWD if none found." },
     amount_sales: { type: "INTEGER" },
     amount_tax: { type: "INTEGER" },
     amount_total: { type: "INTEGER" },
@@ -82,11 +71,12 @@ const invoiceObjectSchema = {
         invoice_date: { type: "NUMBER" },
         seller_name: { type: "NUMBER" },
         seller_tax_id: { type: "NUMBER" },
+        currency: { type: "NUMBER" },
         amount_sales: { type: "NUMBER" },
         amount_tax: { type: "NUMBER" },
         amount_total: { type: "NUMBER" }
       },
-      required: ["invoice_number", "invoice_date", "seller_name", "seller_tax_id", "amount_sales", "amount_tax", "amount_total"]
+      required: ["invoice_number", "invoice_date", "seller_name", "seller_tax_id", "currency", "amount_sales", "amount_tax", "amount_total"]
     },
     usage_metadata: {
       type: "OBJECT",
@@ -138,17 +128,17 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     console.log("SystemInstruction (Type):", typeof SYSTEM_INSTRUCTION);
 
 
-    let promptText = "Extract all invoice data. IMPORTANT: If the document contains MULTIPLE physical invoices (e.g. top and bottom halves, multiple stapled pages, or multiple invoice numbers), return EACH invoice as a SEPARATE object in the JSON array - do NOT merge them. If the document is a Delivery Note (銷貨單/出貨單) or Packing List, classify it as '非發票' and DO NOT extract invoice numbers or amounts. If image is blurry, set 'error_code' accordingly.";
+    let promptText = "Extract all invoice data. IMPORTANT: If the document contains MULTIPLE physical invoices (e.g. top and bottom halves, multiple stapled pages, or multiple invoice numbers), return EACH invoice as a SEPARATE object in the JSON array - do NOT merge them. If the image is a generic unbillable document like a 'Packing List', set 'error_code' to 'NOT_INVOICE' and DO NOT extract invoice numbers or amounts (output 0). If image is blurry, set 'error_code' accordingly.";
 
     if (expectedERP && (expectedERP.amount_total !== undefined || expectedERP.amount_sales !== undefined || expectedERP.amount_tax !== undefined)) {
-      promptText += `\n\n[CROSS-CHECK REQUIRED]: The ERP system expects the following total amounts for this document:\n`;
+      promptText += `\n\n[CROSS-CHECK REQUIRED]: The ERP system expects the following totals for this document:\n`;
       if (expectedERP.amount_total !== undefined) promptText += `- 總金額 (Total Amount): ${expectedERP.amount_total}\n`;
       if (expectedERP.amount_sales !== undefined) promptText += `- 銷售額合計 (Sales Amount): ${expectedERP.amount_sales}\n`;
       if (expectedERP.amount_tax !== undefined) promptText += `- 營業稅 (Tax Amount): ${expectedERP.amount_tax}\n`;
-      promptText += `\nIf your initial extraction DOES NOT match these expected ERP totals, you MUST re-examine the image carefully.\n`;
-      promptText += `Do NOT just blindly trust the addition logic. You MUST visually compare the numbers on the invoice with the ERP numbers provided above.\n`;
-      promptText += `Cross-check specifically: 1. "營業稅" (Tax), 2. "銷售額合計" (Sales), 3. "總金額" (Total).\n`;
-      promptText += `Identify which specific data point is wrong in your extraction, and correct it before returning the final JSON.\n`;
+      promptText += `\nCRITICAL ANTI-HALLUCINATION RULE: You MUST visually verify these numbers are printed on the document.`;
+      promptText += `\nIf your initial extraction DOES NOT match these expected ERP totals, you MUST re-examine the image carefully to see if you missed them.\n`;
+      promptText += `HOWEVER, if you CANNOT see the number on the image, YOU MUST OUTPUT 0. DO NOT under any circumstances return the ERP number just because it was listed here if it is not printed on the document itself. DO NOT calculate difference to fill in "Tax".\n`;
+      
       if (validationRetryCount > 0) {
         promptText += `\nNOTE: This is retry attempt ${validationRetryCount}/3. Previous extraction failed ERP validation. Look closer!\n`;
       }
@@ -294,17 +284,20 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     // Assign processed results back
     results = processedResults;
 
-    // --- Deduplicate ghost results & filter mixed 非發票 ---
-    const hasValidInvoice = results.some(r => r.document_type !== '非發票' && r.invoice_number);
+    // --- Deduplicate ghost results & filter mixed NOT_INVOICE types ---
+    // Check if the file contains at least one valid invoice (not a packing list or empty document)
+    const isGenericDocument = (type: string) => type === '非發票' || type.includes('Packing List') || type.includes('Delivery');
+    const hasValidInvoice = results.some(r => !isGenericDocument(r.document_type || '') && r.invoice_number);
 
     results = results.filter((item, index) => {
-      if (item.document_type === '非發票') {
-        // If file contains a real invoice, drop this "非發票" page entirely (e.g., packing list attached to invoice)
+      const isGeneric = isGenericDocument(item.document_type || '');
+      if (isGeneric) {
+        // If file contains a real invoice, drop this generic page entirely (e.g., packing list attached to invoice)
         if (hasValidInvoice) {
-          console.log(`[Dedup] Dropping 非發票 page because a valid invoice exists in the same file.`);
+          console.log(`[Dedup] Dropping ${item.document_type} page because a valid invoice exists in the same file.`);
           return false;
         }
-        // Keep 非發票 but mark as NOT_INVOICE for UI clarity and ZERO out amounts
+        // Keep it but mark as NOT_INVOICE for UI clarity and ZERO out amounts
         item.error_code = 'NOT_INVOICE' as any;
         item.amount_sales = 0;
         item.amount_tax = 0;

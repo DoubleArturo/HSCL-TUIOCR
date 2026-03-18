@@ -1158,25 +1158,24 @@ const App: React.FC = () => {
                                                 <td className={`px-1 py-3 text-right font-mono font-bold ${row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-400' : 'text-slate-800')}`}>{row.erp ? row.erp.amount_total.toLocaleString() : '-'}</td>
                                                 <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
                                                 <td className="px-1 py-3 text-center border-r border-gray-100 align-middle">
-                                                    {isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500 mx-auto" />}
-                                                    {isMismatch && (
-                                                        <div className="flex flex-col items-center gap-0.5">
-                                                            <AlertTriangle className="w-5 h-5 text-rose-500" />
-                                                            {row.ocr?.document_type && (
-                                                                <span className={`text-[9px] font-bold px-1 rounded mb-0.5 ${row.ocr.document_type === '統一發票' ? 'bg-blue-100 text-blue-700' :
-                                                                    row.ocr.document_type === 'Invoice' ? 'bg-purple-100 text-purple-700' :
-                                                                        row.ocr.document_type === '進口報關' ? 'bg-teal-100 text-teal-700' :
-                                                                            'bg-gray-100 text-gray-600'
-                                                                    }`}>
-                                                                    {row.ocr.document_type}
-                                                                </span>
-                                                            )}
-                                                            {row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
-                                                            {row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">號碼錯誤</span>}
-                                                            {row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
-                                                        </div>
-                                                    )}
-                                                    {isMissing && <div className="flex flex-col items-center"><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></div>}
+                                                    <div className="flex flex-col items-center gap-1">
+                                                        {isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                                                        {isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
+                                                        {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
+                                                        
+                                                        {row.ocr?.document_type && !isMissing && (
+                                                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded leading-none text-center whitespace-nowrap overflow-hidden text-ellipsis max-w-full ${row.ocr.document_type === '統一發票' ? 'bg-blue-100 text-blue-700' :
+                                                                    row.ocr.document_type === '進口報單' || row.ocr.document_type.includes('海關') ? 'bg-teal-100 text-teal-700' :
+                                                                        'bg-purple-100 text-purple-700'
+                                                                }`} title={row.ocr.document_type}>
+                                                                {row.ocr.document_type.length > 6 ? row.ocr.document_type.substring(0, 5) + '..' : row.ocr.document_type}
+                                                            </span>
+                                                        )}
+
+                                                        {isMismatch && row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
+                                                        {isMismatch && row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">號碼錯誤</span>}
+                                                        {isMismatch && row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
+                                                    </div>
                                                 </td>
                                                 <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => row.file && row.file.previewUrl && setSelectedKey(row.key)}>
                                                     {row.file ? (
@@ -1193,9 +1192,30 @@ const App: React.FC = () => {
                                                         </>
                                                     ) : <span className="text-gray-300 text-xs italic">等待上傳...</span>}
                                                 </td>
-                                                <td className="px-1 py-3 text-right font-mono text-indigo-400">{row.ocr ? row.ocr.amount_sales.toLocaleString() : '-'}</td>
-                                                <td className="px-1 py-3 text-right font-mono text-indigo-400">{row.ocr ? row.ocr.amount_tax.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-right font-mono font-bold ${row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-700'}`}>{row.ocr ? row.ocr.amount_total.toLocaleString() : '-'}</td>
+                                                <td className="px-1 py-3 text-right font-mono text-indigo-400">
+                                                    {row.ocr ? (
+                                                        <span className="flex items-center justify-end gap-1">
+                                                            {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-400 font-sans tracking-wide">{row.ocr.currency}</span>}
+                                                            {row.ocr.amount_sales.toLocaleString()}
+                                                        </span>
+                                                    ) : '-'}
+                                                </td>
+                                                <td className="px-1 py-3 text-right font-mono text-indigo-400">
+                                                    {row.ocr ? (
+                                                        <span className="flex items-center justify-end gap-1">
+                                                            {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-400 font-sans tracking-wide">{row.ocr.currency}</span>}
+                                                            {row.ocr.amount_tax.toLocaleString()}
+                                                        </span>
+                                                    ) : '-'}
+                                                </td>
+                                                <td className={`px-1 py-3 text-right font-mono font-bold ${row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-700'}`}>
+                                                    {row.ocr ? (
+                                                        <span className="flex items-center justify-end gap-1">
+                                                            {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-500 font-sans tracking-wide">{row.ocr.currency}</span>}
+                                                            {row.ocr.amount_total.toLocaleString()}
+                                                        </span>
+                                                    ) : '-'}
+                                                </td>
                                                 <td className={`px-1 py-3 text-center font-mono ${row.ocr?.seller_tax_id?.includes('?') ? 'text-amber-500 font-bold' : (row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : 'text-indigo-400')}`}>{row.ocr?.seller_tax_id || '-'}</td>
                                                 <td className="px-1 py-3 text-right pr-4">
                                                     {(row.file?.status === 'SUCCESS' || row.ocr) && (

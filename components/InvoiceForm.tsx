@@ -260,16 +260,19 @@ const InvoiceForm: React.FC<Props> = ({
                 </div>
 
                 <div className="space-y-4">
-                    <div><FieldHeader label="發票號碼" field="invoice_number" score={formData.field_confidence.invoice_number} /><input type="text" className={`w-full border rounded-xl px-3 py-2 font-mono text-lg font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_number, 'invoice_number')}`} value={formData.invoice_number || ''} onChange={(e) => handleChange('invoice_number', e.target.value)} /></div>
-
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><FieldHeader label="憑證類型" field="document_type" score={100} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-sm font-bold text-indigo-700 bg-indigo-50 border-indigo-200 focus:ring-2 focus:ring-indigo-500 transition-all outline-none`} value={formData.document_type || ''} onChange={(e) => handleChange('document_type', e.target.value)} /></div>
+                        <div><FieldHeader label="憑證號碼" field="invoice_number" score={formData.field_confidence.invoice_number} /><input type="text" className={`w-full border rounded-xl px-3 py-2 font-mono text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_number, 'invoice_number')}`} value={formData.invoice_number || ''} onChange={(e) => handleChange('invoice_number', e.target.value)} /></div>
+                    </div>
                     <div>
                         <FieldHeader label="開立日期" field="invoice_date" score={formData.field_confidence.invoice_date} />
                         <input type="date" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_date, 'invoice_date')}`} value={formData.invoice_date || ''} onChange={(e) => handleChange('invoice_date', e.target.value)} />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
-                        <div><FieldHeader label="賣方統編" field="seller_tax_id" score={formData.field_confidence.seller_tax_id} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.seller_tax_id, 'seller_tax_id')}`} value={formData.seller_tax_id || ''} onChange={(e) => handleChange('seller_tax_id', e.target.value)} /></div>
-                        <div><FieldHeader label="賣方公司名稱" field="seller_name" score={formData.field_confidence.seller_name} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.seller_name, 'seller_name')}`} value={formData.seller_name || ''} onChange={(e) => handleChange('seller_name', e.target.value)} /></div>
+                    <div className="grid grid-cols-12 gap-3">
+                        <div className="col-span-3"><FieldHeader label="幣別" field="currency" score={formData.field_confidence.currency} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.currency || 100, 'currency')}`} value={formData.currency || 'TWD'} onChange={(e) => handleChange('currency', e.target.value)} /></div>
+                        <div className="col-span-4"><FieldHeader label="賣方統編" field="seller_tax_id" score={formData.field_confidence.seller_tax_id} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.seller_tax_id, 'seller_tax_id')}`} value={formData.seller_tax_id || ''} onChange={(e) => handleChange('seller_tax_id', e.target.value)} /></div>
+                        <div className="col-span-5"><FieldHeader label="公司名稱" field="seller_name" score={formData.field_confidence.seller_name} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.seller_name, 'seller_name')}`} value={formData.seller_name || ''} onChange={(e) => handleChange('seller_name', e.target.value)} /></div>
                     </div>
 
                     <div className="p-4 bg-gray-900 rounded-2xl shadow-xl border border-gray-800">
