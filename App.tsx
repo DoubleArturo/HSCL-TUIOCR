@@ -418,6 +418,8 @@ const App: React.FC = () => {
             const filename = processedFile.name;
             let id = filename.substring(0, filename.lastIndexOf('.')) || filename;
 
+            // Disambiguate: if same base-name ID already taken by a DIFFERENT file (e.g. G61-Q10001.pdf vs G61-Q10001.jpg),
+            // append the extension so both get processed and prefix-matched to the same ERP row.
             if (existingMap.has(id) || nextInvoices.some(n => n.id === id && n.file.name !== processedFile.name)) {
                 const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id);
                 if (existing && existing.file.name !== processedFile.name) {
@@ -426,13 +428,21 @@ const App: React.FC = () => {
                 }
             }
 
-            // Save to IndexedDB
-            fileStorageService.saveFile(id, processedFile).catch(err => console.error("IDB Save Fail", err));
+            // Sanitize ID: Remove any spaces or special characters that might cause IDB issues in some environments
+            const sanitizedId = id.replace(/[^\w-]/g, '_');
+
+            // Save to IndexedDB - CRITICAL: Must AWAIT to prevent race conditions on Edge
+            try {
+                await fileStorageService.saveFile(sanitizedId, processedFile);
+            } catch (err) {
+                logger.error('FILE', `IndexedDB Save Failed for ${sanitizedId}`, err);
+                // We proceed but it might show 'missing file' later if rehydrated
+            }
 
             const previewUrl = shouldGeneratePreview ? URL.createObjectURL(processedFile) : '';
 
-            if (existingMap.has(id) || nextInvoices.some(n => n.id === id)) {
-                const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id)!;
+            if (existingMap.has(sanitizedId) || nextInvoices.some(n => n.id === sanitizedId)) {
+                const existing = existingMap.get(sanitizedId) || nextInvoices.find(n => n.id === sanitizedId)!;
 
                 if (existing.status === 'SUCCESS' && existing.data.length > 0) {
                     const entry: InvoiceEntry = {
@@ -441,14 +451,14 @@ const App: React.FC = () => {
                         previewUrl: previewUrl,
                         status: 'SUCCESS'
                     };
-                    nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
+                    nextInvoices = nextInvoices.map(inv => inv.id === sanitizedId ? entry : inv);
                 } else {
-                    const entry: InvoiceEntry = { id, file: processedFile, previewUrl, status: 'PENDING', data: [] };
-                    nextInvoices = nextInvoices.map(inv => inv.id === id ? entry : inv);
+                    const entry: InvoiceEntry = { id: sanitizedId, file: processedFile, previewUrl, status: 'PENDING', data: [] };
+                    nextInvoices = nextInvoices.map(inv => inv.id === sanitizedId ? entry : inv);
                     newProcessQueue.push(entry);
                 }
             } else {
-                const entry: InvoiceEntry = { id, file: processedFile, previewUrl, status: 'PENDING', data: [] };
+                const entry: InvoiceEntry = { id: sanitizedId, file: processedFile, previewUrl, status: 'PENDING', data: [] };
                 nextInvoices.push(entry);
                 newProcessQueue.push(entry);
             }

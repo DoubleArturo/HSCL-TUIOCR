@@ -5,7 +5,10 @@ const STORE_NAME = 'files';
 
 interface StoredFile {
     id: string;
-    file: File;
+    blob?: Blob;
+    buffer?: ArrayBuffer;
+    name: string;
+    type: string;
     timestamp: number;
 }
 
@@ -28,10 +31,20 @@ export const fileStorageService = {
 
     async saveFile(id: string, file: File): Promise<void> {
         const db = await this.openDB();
+        
+        // Use ArrayBuffer for cross-browser stability (Edge/Safari bugs with Blob directly in IDB)
+        const buffer = await file.arrayBuffer();
+        
         return new Promise((resolve, reject) => {
             const transaction = db.transaction([STORE_NAME], 'readwrite');
             const store = transaction.objectStore(STORE_NAME);
-            const request = store.put({ id, file, timestamp: Date.now() });
+            const request = store.put({ 
+                id, 
+                buffer, // Store as safe ArrayBuffer
+                name: file.name,
+                type: file.type,
+                timestamp: Date.now() 
+            });
 
             request.onsuccess = () => resolve();
             request.onerror = () => reject('Failed to save file');
@@ -47,7 +60,23 @@ export const fileStorageService = {
 
             request.onsuccess = () => {
                 const result = request.result as StoredFile;
-                resolve(result ? result.file : null);
+                if (!result) return resolve(null);
+                
+                // 1. New safe approach: ArrayBuffer
+                if (result.buffer) {
+                    resolve(new File([result.buffer], result.name, { type: result.type }));
+                } 
+                // 2. Legacy: File or Blob object
+                else {
+                    const fileData = (result as any).file;
+                    if (fileData instanceof File || fileData instanceof Blob) {
+                        resolve(new File([fileData], result.name || (fileData as any).name || 'unknown', { type: result.type || fileData.type }));
+                    } else if (result.blob) {
+                        resolve(new File([result.blob], result.name, { type: result.type }));
+                    } else {
+                        resolve(null);
+                    }
+                }
             };
             request.onerror = () => reject('Failed to get file');
         });
