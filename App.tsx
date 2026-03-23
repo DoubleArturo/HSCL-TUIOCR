@@ -44,6 +44,7 @@ const App: React.FC = () => {
     const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
     const isDirtyRef = useRef(false);
     const latestProjectRef = useRef<Project | null>(null);
+    const cancelProcessingRef = useRef(false); // Used to instantly halt background async requests
 
     // Keep ref in sync
     useEffect(() => {
@@ -145,6 +146,7 @@ const App: React.FC = () => {
             // Rehydrate File objects (mock files, real content needs re-upload)
             loaded.invoices = loaded.invoices.map((inv: any) => ({
                 ...inv,
+                status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status, // Reset stuck items from mid-batch refresh
                 file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }),
                 previewUrl: '' // Empty until re-uploaded
             }));
@@ -335,13 +337,14 @@ const App: React.FC = () => {
     };
 
     // Smart Upload with Deduplication, Concurrency, and Batch Updates
-    const handleFiles = async (files: FileList) => {
+    const handleFiles = async (files: FileList | File[]) => {
         if (!project) return;
 
         const fileArray = Array.from(files);
         if (fileArray.length === 0) return;
 
         setStatus(AppStatus.PROCESSING);
+        cancelProcessingRef.current = false; // Reset lock on start
 
         // Reset metrics for new batch
         const batchStart = Date.now();
@@ -408,6 +411,7 @@ const App: React.FC = () => {
         }
 
         for (const file of fileArray) {
+            if (cancelProcessingRef.current) break; // Stop if cancelled
             let processedFile = file;
             const isTif = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
 
@@ -470,6 +474,14 @@ const App: React.FC = () => {
             }
         }
 
+        // If processing was cancelled during file preparation, stop here
+        if (cancelProcessingRef.current) {
+            setStatus(AppStatus.IDLE);
+            setProgress({ current: 0, total: 0, status: 'IDLE' });
+            if (fileInputRef.current) fileInputRef.current.value = '';
+            return;
+        }
+
         // Update list to show "PENDING" state
         updateProjectInvoices(() => nextInvoices);
 
@@ -526,6 +538,8 @@ const App: React.FC = () => {
 
         // Worker function for the concurrency pool
         const processItem = async (item: InvoiceEntry) => {
+            if (cancelProcessingRef.current) return; // Stop if cancelled
+
             // Mark as processing in our batch map
             changesMap.set(item.id, { status: 'PROCESSING' });
             logger.info('QUEUE', `Processing item: ${item.id}`);
@@ -609,6 +623,7 @@ const App: React.FC = () => {
 
         // We use a simple recurrent function to process the queue
         const processNext = async () => {
+            if (cancelProcessingRef.current) return; // INSTANT ABORT
             if (queue.length === 0) return;
             const item = queue.shift();
             if (item) {
@@ -618,7 +633,7 @@ const App: React.FC = () => {
                 await new Promise(resolve => setTimeout(resolve, 500));
 
                 // After finishing one, try to pick up another
-                if (queue.length > 0) await processNext();
+                if (queue.length > 0 && !cancelProcessingRef.current) await processNext();
             }
         };
 
@@ -690,7 +705,7 @@ const App: React.FC = () => {
 
         const mappedRows = project.erpData.map((erp, index) => {
             // Smart Matching: Find ALL files that start with the voucher ID
-            // e.g. ERP "G61-PC0008" matches "G61-PC0008", "G61-PC0008-1", "G61-PC0008-2"
+            // e.g. ERP "G61-PC0008" matches "G61-PC0008-1", "G61-PC0008-2"
             const matchingFiles: InvoiceEntry[] = [];
 
             // 1. Try exact match
@@ -1039,6 +1054,18 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="flex items-center gap-2">
+                            {project?.invoices.some(inv => inv.status === 'PENDING') && (
+                                <button
+                                    onClick={() => {
+                                        const pendingFiles = project.invoices.filter(inv => inv.status === 'PENDING' && inv.file).map(inv => inv.file);
+                                        if (pendingFiles.length > 0) handleFiles(pendingFiles);
+                                    }}
+                                    className="btn-sm bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 font-bold px-3 py-1 flex items-center gap-1.5 shadow-sm"
+                                    title={`發現 ${project.invoices.filter(inv => inv.status === 'PENDING').length} 筆未解析憑證。點擊以繼續解析。`}
+                                >
+                                    <Lucide.Play className="w-4 h-4" /> 繼續解析 ({project.invoices.filter(inv => inv.status === 'PENDING').length} 筆)
+                                </button>
+                            )}
                             <select
                                 value={selectedModel}
                                 onChange={(e) => setSelectedModel(e.target.value)}
@@ -1084,10 +1111,24 @@ const App: React.FC = () => {
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-1 flex items-center justify-between text-xs">
                     <CostDashboard project={project} accuracy={metrics.accuracy} modelName={selectedModel} totalDuration={metrics.duration} />
                     {progress.status !== 'IDLE' && (
-                        <span className="font-mono font-bold text-indigo-600 flex items-center gap-2">
-                            {progress.status === 'PROCESSING' && <Loader2 className="w-3 h-3 animate-spin" />}
-                            Processing: {progress.current} / {progress.total}
-                        </span>
+                        <div className="flex items-center gap-3">
+                            <span className="font-mono font-bold text-indigo-600 flex items-center gap-2">
+                                {progress.status === 'PROCESSING' && <Loader2 className="w-3 h-3 animate-spin" />}
+                                Processing: {progress.current} / {progress.total}
+                            </span>
+                            {progress.status === 'PROCESSING' && (
+                                <button
+                                    onClick={() => {
+                                        cancelProcessingRef.current = true;
+                                        setProgress(p => ({ ...p, status: 'IDLE' }));
+                                        setStatus(AppStatus.IDLE);
+                                    }}
+                                    className="px-2 py-0.5 bg-white border border-rose-200 text-rose-500 rounded text-[10px] font-bold hover:bg-rose-50 flex items-center gap-1 shadow-sm transition-colors"
+                                >
+                                    <Lucide.Square className="w-2.5 h-2.5" /> 停止解析
+                                </button>
+                            )}
+                        </div>
                     )}
                 </div>
             </div>
@@ -1132,14 +1173,18 @@ const App: React.FC = () => {
                                 <tbody className="divide-y divide-gray-50 text-[13px]">
                                     {auditList.map((row) => {
                                         const isMismatch = row.auditStatus === 'MISMATCH';
-                                        const isMissing = row.auditStatus === 'MISSING_FILE';
+                                        let isMissing = row.auditStatus === 'MISSING_FILE';
                                         const isExtra = row.auditStatus === 'EXTRA_FILE';
                                         const isMatch = row.auditStatus === 'MATCH';
+                                        const isPending = row.file?.status === 'PENDING';
                                         const hasOcrButNoFile = row.file && !row.file.previewUrl && row.file.status === 'SUCCESS';
 
+                                        // Override missing visual flag if it's just PENDING
+                                        if (isPending) isMissing = false;
+
                                         return (
-                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
-                                                <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing ? 'text-slate-400' : 'text-slate-700'}`}>
+                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
+                                                <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing || isPending ? 'text-slate-400' : 'text-slate-700'}`}>
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{row.id}</span>
                                                         {isExtra && <span className="text-[10px] bg-amber-100 text-amber-700 px-1 rounded">無 ERP</span>}
@@ -1166,8 +1211,9 @@ const App: React.FC = () => {
                                                 <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
                                                 <td className="px-1 py-3 text-center border-r border-gray-100 align-middle">
                                                     <div className="flex flex-col items-center gap-1">
-                                                        {isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                                                        {isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
+                                                        {isPending && <><Lucide.Clock className="w-4 h-4 text-amber-500" /><span className="text-[9px] text-amber-600 font-bold mt-0.5">待解析</span></>}
+                                                        {!isPending && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                                                        {!isPending && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
                                                         {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
                                                         
                                                         {row.ocr?.document_type && !isMissing && (
@@ -1196,6 +1242,14 @@ const App: React.FC = () => {
                                                                                 (hasOcrButNoFile ? '需補上傳' : '未對應'))))}
                                                             </span>
                                                             {hasOcrButNoFile && <span className="text-[9px] text-amber-600 bg-amber-50 px-1 rounded">資料已存/缺圖</span>}
+                                                            {isPending && (
+                                                                <button
+                                                                    onClick={(e) => { e.stopPropagation(); handleFiles([row.file!]); }}
+                                                                    className="ml-2 text-[9px] px-1.5 py-0.5 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-1 transition-colors bg-white font-bold"
+                                                                >
+                                                                    <Lucide.Play className="w-2.5 h-2.5" /> 原單續傳
+                                                                </button>
+                                                            )}
                                                         </>
                                                     ) : <span className="text-gray-300 text-xs italic">等待上傳...</span>}
                                                 </td>
