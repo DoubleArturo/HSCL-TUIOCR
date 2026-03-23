@@ -344,42 +344,51 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     }
 
     // --- ERP Crosscheck Validation Retry Logic ---
-    if (expectedERP && validationRetryCount < 1) { // Reduced from 3 to 1 to save time
+    if (expectedERP && validationRetryCount < 1) { // STRICT CAP: Only try once to save time
       // Only check amounts against valid invoices
       const validInvoices = results.filter(r => r.document_type !== '非發票' && r.error_code !== 'NOT_INVOICE');
 
-      const ocrTotalSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
-      const ocrSalesSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_sales || 0), 0);
-      const ocrTaxSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax || 0), 0);
+      // SMART GUARD: If the first pass found NO valid invoices (e.g., blurry, packing list),
+      // DO NOT escalate to Pro. Escalating is a waste of time for non-invoices.
+      if (validInvoices.length > 0) {
+          const ocrTotalSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
+          const ocrSalesSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_sales || 0), 0);
+          const ocrTaxSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax || 0), 0);
 
-      let hasMismatch = false;
-      const mismatchLogs = [];
+          let hasMismatch = false;
+          const mismatchLogs = [];
 
-      if (expectedERP.amount_total !== undefined && expectedERP.amount_total !== 0 && Math.abs(ocrTotalSum - expectedERP.amount_total) > 1) {
-        hasMismatch = true;
-        mismatchLogs.push(`Total mismatch (OCR: ${ocrTotalSum}, ERP: ${expectedERP.amount_total})`);
-      }
-      if (expectedERP.amount_sales !== undefined && expectedERP.amount_sales !== 0 && Math.abs(ocrSalesSum - expectedERP.amount_sales) > 1) {
-        hasMismatch = true;
-        mismatchLogs.push(`Sales mismatch (OCR: ${ocrSalesSum}, ERP: ${expectedERP.amount_sales})`);
-      }
-      if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1) {
-        hasMismatch = true;
-        mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
-      }
+          if (expectedERP.amount_total !== undefined && expectedERP.amount_total !== 0 && Math.abs(ocrTotalSum - expectedERP.amount_total) > 1) {
+            hasMismatch = true;
+            mismatchLogs.push(`Total mismatch (OCR: ${ocrTotalSum}, ERP: ${expectedERP.amount_total})`);
+          }
+          if (expectedERP.amount_sales !== undefined && expectedERP.amount_sales !== 0 && Math.abs(ocrSalesSum - expectedERP.amount_sales) > 1) {
+            hasMismatch = true;
+            mismatchLogs.push(`Sales mismatch (OCR: ${ocrSalesSum}, ERP: ${expectedERP.amount_sales})`);
+          }
+          if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1) {
+            hasMismatch = true;
+            mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
+          }
 
-      if (hasMismatch) {
-        console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1...`);
-        
-        // Recursive call with same model to avoid massive slowdowns (removed pro escalation)
-        const retryResults = await analyzeInvoice(base64Data, mimeType, modelName, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
+          if (hasMismatch) {
+            console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1 with gemini-2.5-pro...`);
+            
+            // ESCALATION: Use the much smarter (but slower) Pro model for the single validation retry
+            const nextModel = 'gemini-2.5-pro';
 
-        // Prepend escalation log to trace_logs
-        return retryResults.map(item => {
-          const log = `[System] Retried (Attempt ${validationRetryCount + 1}) due to ERP mismatch: ${mismatchLogs.join(', ')}.`;
-          item.trace_logs = [log, ...(item.trace_logs || [])];
-          return item;
-        });
+            // Recursive call with Pro model
+            const retryResults = await analyzeInvoice(base64Data, mimeType, nextModel, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
+
+            // Prepend escalation log to trace_logs
+            return retryResults.map(item => {
+              const log = `[System] Escapated to PRO (Attempt ${validationRetryCount + 1}) due to ERP mismatch: ${mismatchLogs.join(', ')}.`;
+              item.trace_logs = [log, ...(item.trace_logs || [])];
+              return item;
+            });
+          }
+      } else {
+         console.log(`[Validation Guard] Skipping Pro escalation because no valid invoice data was found initially.`);
       }
     }
 
