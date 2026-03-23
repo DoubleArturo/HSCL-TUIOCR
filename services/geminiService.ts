@@ -344,7 +344,7 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     }
 
     // --- ERP Crosscheck Validation Retry Logic ---
-    if (expectedERP && validationRetryCount < 3) {
+    if (expectedERP && validationRetryCount < 1) { // Reduced from 3 to 1 to save time
       // Only check amounts against valid invoices
       const validInvoices = results.filter(r => r.document_type !== '非發票' && r.error_code !== 'NOT_INVOICE');
 
@@ -369,12 +369,10 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       }
 
       if (hasMismatch) {
-        console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/3...`);
-        // Escalate to gemini-2.5-pro if we've failed already and aren't using it yet
-        const nextModel = (validationRetryCount >= 1 && !modelName.includes('pro')) ? 'gemini-2.5-pro' : modelName;
-
-        // Recursive call with incremented validationRetryCount
-        const retryResults = await analyzeInvoice(base64Data, mimeType, nextModel, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
+        console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1...`);
+        
+        // Recursive call with same model to avoid massive slowdowns (removed pro escalation)
+        const retryResults = await analyzeInvoice(base64Data, mimeType, modelName, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
 
         // Prepend escalation log to trace_logs
         return retryResults.map(item => {

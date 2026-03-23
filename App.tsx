@@ -488,7 +488,8 @@ const App: React.FC = () => {
         logger.info('QUEUE', `Batch started with ${totalItems} new items using model: ${selectedModel}`, { fileNames: newProcessQueue.map(i => i.id) });
         setProgress({ current: 0, total: totalItems, status: 'PROCESSING' });
 
-        const CONCURRENCY_LIMIT = 2; // 單次測試：從 20 降至 2，避免觸發 429 Error
+        // --- START BATCH PROCESS ---
+        const CONCURRENCY_LIMIT = 5; // Increased from 2 to 5 for better throughput without hitting 429 too fast
         const changesMap = new Map<string, Partial<InvoiceEntry>>();
 
         // Start the batch updater interval
@@ -613,8 +614,8 @@ const App: React.FC = () => {
             if (item) {
                 await processItem(item);
 
-                // 強制延遲 4 秒，稀釋 API 請求頻率
-                await new Promise(resolve => setTimeout(resolve, 4000));
+                // 強制延遲 0.5 秒，稍微稀釋 API 請求頻率即可
+                await new Promise(resolve => setTimeout(resolve, 500));
 
                 // After finishing one, try to pick up another
                 if (queue.length > 0) await processNext();
