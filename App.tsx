@@ -153,13 +153,18 @@ const App: React.FC = () => {
             // Async rehydrate DB files
             const rehydrateImages = async () => {
                 const updatedInvoices = await Promise.all(loaded.invoices.map(async (inv: any) => {
-                    const dbFile = await fileStorageService.getFile(inv.id);
-                    if (dbFile) {
-                        return {
-                            ...inv,
-                            file: dbFile,
-                            previewUrl: URL.createObjectURL(dbFile)
-                        };
+                    try {
+                        const dbFile = await fileStorageService.getFile(inv.id);
+                        if (dbFile) {
+                            return {
+                                ...inv,
+                                file: dbFile,
+                                previewUrl: URL.createObjectURL(dbFile)
+                            };
+                        }
+                    } catch (err: any) {
+                        logger.error('FILE', `IndexedDB Load Failed for ${inv.id}`, err);
+                        alert(`讀取圖片或PDF失敗 (${inv.id}): ${err?.name || 'Error'} - ${err?.message || '未知儲存空間錯誤。建議檢查儲存空間或隱私權設定。'}`);
                     }
                     return {
                         ...inv,
@@ -434,8 +439,9 @@ const App: React.FC = () => {
             // Save to IndexedDB - CRITICAL: Must AWAIT to prevent race conditions on Edge
             try {
                 await fileStorageService.saveFile(sanitizedId, processedFile);
-            } catch (err) {
+            } catch (err: any) {
                 logger.error('FILE', `IndexedDB Save Failed for ${sanitizedId}`, err);
+                alert(`儲存檔案至瀏覽器失敗 (${sanitizedId}): ${err?.name || 'Error'} - ${err?.message || '未知儲存空間錯誤。您的磁碟可能已滿，或是處於無痕模式。'}`);
                 // We proceed but it might show 'missing file' later if rehydrated
             }
 
