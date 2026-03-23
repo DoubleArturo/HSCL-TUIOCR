@@ -401,8 +401,8 @@ const App: React.FC = () => {
 
         let nextInvoices = [...currentInvoices];
 
-        // Threshold for performance: only generate previews automatically if batch size < 100
-        const shouldGeneratePreview = fileArray.length < 100;
+        // Threshold for performance: only generate previews automatically if batch size < 800
+        const shouldGeneratePreview = fileArray.length < 800;
         if (!shouldGeneratePreview) {
             logger.warn('SYSTEM', `Batch size (${fileArray.length}) is large. Auto-previews disabled to save memory.`);
         }
