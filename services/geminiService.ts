@@ -31,17 +31,37 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 - **Date**: Normalize to YYYY-MM-DD. Handle ROC years.
 - **Tax IDs**: Must be 8 digits for Taiwan companies.
 
-### 3. Tax Code Classification (稅別 tax_code)
-Based on the document type and content, assign the correct tax code:
-- **"T300"**: 三聆式手開發票 (3-part hand-written invoice)
-- **"T302"**: 三聆式收銀機發票 (3-part POS/computer-generated invoice)
-- **"T400"**: 海關進口貨物稅費 (customs import tax receipts)
-- **"T500"**: 二聆式收銀機發票 (2-part POS invoice) OR 車票 (transportation tickets: 高鐵、火車、客運、捷運, etc.)
-- **"TXXX"**: All other documents: English "Invoice", 收据 (沒有發票號碼), 免用統一發票收据, 旅行社代收轉付收据, 計程車收据, customs docs
+### 3. Tax Code Classification (稅別 tax_code) — 對照 Tiptop 系統
+Based on the document type and content, assign ONE of the following codes:
+- **"T300"**: 三聯式手開統一發票（手寫填入，發票格式21）→ voucher_type="三聯手寫"
+- **"T301"**: 三聯式電子發票（印有「電子發票證明聯」字樣，有QR code，發票格式25，需上傳財政部電子發票平台）→ voucher_type="三聯電子"
+- **"T302"**: 三聯式收銀機統一發票（印有「收銀機統一發票」字樣，三聯式/扣抵聯，發票格式25，無QR code）→ voucher_type="三聯收銀"
+- **"T400"**: 海關進口貨物稅費繳納憑單（customs import tax，發票格式28）
+- **"T500"**: 二聯式收銀機統一發票（印有「收銀機統一發票」字樣，二聯式，發票格式22）OR 車票（高鐵、火車、客運、捷運 ticket）
+- **"TXXX"**: All other: 收據（免用統一發票、計程車收據、停車場）、English Invoice（外國廠商）、旅行社代收轉付收据
+
+**KEY DISTINCTION T301 vs T302**:
+- T301 (三聯電子): MUST have "電子發票證明聯" text AND QR codes printed. Has "格式25" or "格式 25" printed. Needs e-invoice platform upload.
+- T302 (三聯收銀): Has "收銀機統一發票" text, shows "(三聯式" or "扣抵聯", NO QR codes, NO "電子發票" text.
+
+**KEY DISTINCTION T300 vs T302**:
+- T300 (手寫): The monetary amounts and buyer info are written by hand/pen. No "收銀機" text. Format 21.
+- T302 (收銀): All amounts are printed by machine. Has "收銀機統一發票" text.
 
 **CRITICAL SKIP RULES** - set error_code to "NOT_INVOICE" for these:
 1. English "Invoice" documents (foreign supplier invoices without TW invoice number)
 2. Transportation tickets (高鐵、火車、客運、捷遊 ticket, etc.) - set tax_code="T500" then skip
+
+### 4. Voucher Type Classification (voucher_type)
+Must be consistent with tax_code:
+- **"三聯手寫"**: T300 — 手寫填入三聯發票，格式21
+- **"三聯收銀"**: T302 — 收銀機三聯發票，格式25，無QR code
+- **"三聯電子"**: T301 — 電子發票證明聯，格式25，有QR code
+- **"二聯收銀"**: T500 — 收銀機二聯發票，格式22
+- **"收據"**: TXXX — 各類收據（計程車、停車場、免用統一發票）
+- **"車票"**: T500 — 高鐵/火車/客運/捷運票券
+- **"Invoice"**: TXXX — 英文Invoice（外國廠商）
+- **"其他"**: 其他（T400海關、進口報單等）
 
 ### 2. Output Format
 Return ONLY valid JSON matching the schema.
@@ -57,10 +77,15 @@ const invoiceObjectSchema = {
       type: "STRING",
       description: "Exact document classification. e.g. '統一發票', 'Commercial Invoice', 'Receipt', '進口報單', 'Packing List', etc."
     },
+    voucher_type: {
+      type: "STRING",
+      enum: ["三聯手寫", "三聯收銀", "三聯電子", "二聯收銀", "收據", "車票", "Invoice", "其他"],
+      description: "Fine-grained voucher format type per section 4 of instructions"
+    },
     tax_code: {
       type: "STRING",
-      enum: ["T300", "T302", "T400", "T500", "TXXX"],
-      description: "稅別: T300=三聆手開, T302=三聆機開, T400=海關進口, T500=二聆機開或車票, TXXX=其他(收据/Invoice等)"
+      enum: ["T300", "T301", "T302", "T400", "T500", "TXXX"],
+      description: "稅別: T300=三聆手開(格21), T301=三聆電子(格25+QR), T302=三聆收銀(格25), T400=海關進口(格28), T500=二聆收銀(格22)或車票, TXXX=其他"
     },
     error_code: { type: "STRING", enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
     invoice_number: { type: "STRING" },
@@ -133,7 +158,9 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       },
     };
 
-    const effectiveModel = modelName.includes('hybrid') ? 'gemini-2.5-flash' : modelName;
+    const effectiveModel = modelName.includes('hybrid')
+      ? (modelName.startsWith('gemini-2.0') ? 'gemini-2.0-flash' : 'gemini-2.5-flash')
+      : modelName;
 
     // DEBUG LOGGING
     console.log("DEBUG GEMINI PAYLOAD:");
@@ -229,46 +256,42 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       logs.push(`Initial Error Code: ${item.error_code}`);
 
       // --- TAX CODE CLASSIFICATION ---
-      // Determine tax_code based on document_type if AI didn't assign one
+      // Determine tax_code based on voucher_type/document_type if AI didn't assign one
       if (!item.tax_code) {
         const dt = (item.document_type || '').toLowerCase();
+        const vt = item.voucher_type || '';
         const invNo = item.invoice_number || '';
-        // T400: Customs import
-        if (dt.includes('海關') || dt.includes('customs') || dt.includes('進口報單') || dt.includes('進口報賤') || dt.includes('稅費繳納')) {
+
+        if (vt === '三聯手寫') item.tax_code = 'T300';
+        else if (vt === '三聯電子') item.tax_code = 'T301';
+        else if (vt === '三聯收銀') item.tax_code = 'T302';
+        else if (vt === '二聯收銀') item.tax_code = 'T500';
+        else if (vt === '車票') item.tax_code = 'T500';
+        else if (vt === 'Invoice' || vt === '收據') item.tax_code = 'TXXX';
+        // Fallback to document_type heuristics
+        else if (dt.includes('海關') || dt.includes('customs') || dt.includes('進口報單') || dt.includes('稅費繳納')) {
           item.tax_code = 'T400';
-        }
-        // T500: 2-part POS or transit tickets
-        else if (dt.includes('二聆') || dt.includes('2-part') ||
-          dt.includes('高鐵') || dt.includes('火車') || dt.includes('客運') || dt.includes('捷遊') || dt.includes('捷運') ||
-          dt.includes('ticket') || dt.includes('車票') || dt.includes('車票') || dt.includes('交通票')) {
+        } else if (dt.includes('高鐵') || dt.includes('火車') || dt.includes('客運') || dt.includes('捷運') || dt.includes('ticket') || dt.includes('車票')) {
           item.tax_code = 'T500';
-        }
-        // T300: 3-part hand-written
-        else if (dt.includes('三聆') && (dt.includes('手開') || dt.includes('手开'))) {
-          item.tax_code = 'T300';
-        }
-        // T302: 3-part POS/machine-printed
-        else if (dt.includes('三聆') && (dt.includes('機') || dt.includes('收銀'))) {
-          item.tax_code = 'T302';
-        }
-        // TXXX: English Invoice (foreign), receipts without TW invoice number, etc.
-        else if (
-          item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice' ||
-          dt.includes('收据') || dt.includes('receipt') || dt.includes('免用') ||
-          dt.includes('旅行社') || dt.includes('計程車') || !invNo
-        ) {
+        } else if (dt.includes('電子發票')) {
+          item.tax_code = 'T301';
+        } else if (dt.includes('統一發票') || item.document_type === '統一發票') {
+          item.tax_code = 'T302'; // default 3-part machine for B2B
+        } else if (item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice' || dt.includes('收据') || dt.includes('receipt') || dt.includes('免用') || dt.includes('計程車') || !invNo) {
+          item.tax_code = 'TXXX';
+        } else {
           item.tax_code = 'TXXX';
         }
-        // 統一發票: Detect sub-type from invoice number presence + context
-        else if (dt.includes('統一發票') || item.document_type === '統一發票') {
-          // Default 3-part machine (most common for B2B)
-          item.tax_code = 'T302';
-        }
-        // Default fallback
-        else {
-          item.tax_code = 'TXXX';
-        }
-        logs.push(`Tax Code Assigned: ${item.tax_code} (from document_type: ${item.document_type})`);
+        logs.push(`Tax Code Assigned: ${item.tax_code} (from voucher_type: ${vt}, document_type: ${item.document_type})`);
+      }
+
+      // --- SYNC voucher_type from tax_code if AI didn't provide it ---
+      if (!item.voucher_type) {
+        const tcMap: Record<string, string> = {
+          'T300': '三聯手寫', 'T301': '三聯電子', 'T302': '三聯收銀',
+          'T500': '二聯收銀', 'T400': '其他', 'TXXX': '收據'
+        };
+        item.voucher_type = (tcMap[item.tax_code || ''] || '其他') as any;
       }
 
       // --- SKIP LOGIC for Invoice (foreign) and transit tickets ---
@@ -403,25 +426,27 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       return true;
     });
 
-    // --- Hybrid Auto-Escalation Logic ---
-    // Only enabled if the user explicitly selected the Hybrid option (modelName incl. 'hybrid')
+    // --- Hybrid Auto-Escalation Logic (Tier 1 Flash → Tier 2 Pro) ---
+    // Only triggered when user selected a *-hybrid model option.
     if (modelName.includes('hybrid')) {
-      const needsEscalation = results.some(r =>
-        r.error_code !== 'SUCCESS' ||
-        !r.verification.logic_is_valid ||
-        (r.invoice_number === undefined) // Missing critical field
-      );
+      // Only escalate for valid invoices (not receipts/tickets/packing lists)
+      const validResults = results.filter(r => r.error_code !== 'NOT_INVOICE' && r.tax_code !== 'TXXX');
+      const needsEscalation = validResults.length > 0 && validResults.some(r => {
+        // Arithmetic check: sales + tax ≠ total (core logic failure)
+        const arithmeticFail = r.amount_total > 0 && r.amount_sales > 0 &&
+          Math.abs((r.amount_sales + r.amount_tax) - r.amount_total) > 1;
+        // Missing invoice number on a document that should have one
+        const missingInvNo = !r.invoice_number && r.tax_code !== 'TXXX' && r.tax_code !== 'T500';
+        // AI itself flagged low confidence
+        const lowConfidence = r.verification.ai_confidence < 70;
+        return arithmeticFail || missingInvNo || lowConfidence || !r.verification.logic_is_valid;
+      });
 
       if (needsEscalation) {
-        console.log(`[Auto-Escalation] Validation failed with ${modelName}. Retrying with gemini-2.5-pro...`);
-
-        // Recursive call with Pro model
-        const proResults = await analyzeInvoice(base64Data, mimeType, 'gemini-2.5-pro', retryCount, knownSellers);
-
-        // Append a log to the Pro result indicating it was an escalation
+        console.log(`[Auto-Escalation] Tier-1 failed (${effectiveModel}). Escalating to gemini-2.5-pro...`);
+        const proResults = await analyzeInvoice(base64Data, mimeType, 'gemini-2.5-pro', retryCount, knownSellers, expectedERP, validationRetryCount);
         return proResults.map(item => {
-          const escalationLog = `[System] Auto-escalated from Hybrid Flash to Pro due to validation failure.`;
-          item.trace_logs = [escalationLog, ...(item.trace_logs || [])];
+          item.trace_logs = [`[System] Escalated: ${effectiveModel} → gemini-2.5-pro`, ...(item.trace_logs || [])];
           return item;
         });
       }

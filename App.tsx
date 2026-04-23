@@ -32,7 +32,7 @@ const App: React.FC = () => {
     const [project, setProject] = useState<Project | null>(null);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);
-    const [selectedModel, setSelectedModel] = useState<string>('gemini-2.5-pro');
+    const selectedModel = 'gemini-2.0-flash-hybrid';
     const [batchStats, setBatchStats] = useState({ startTime: 0, endTime: 0, totalDuration: 0 });
 
     const [isCreating, setIsCreating] = useState(false);
@@ -868,12 +868,18 @@ const App: React.FC = () => {
 
     // --- Metrics Calculation ---
     const metrics = useMemo(() => {
-        if (!project) return { accuracy: 0, duration: 0 };
-        // Denominator: Only project items that have at least one file attached
-        const itemsWithFiles = auditList.filter(i => i.auditStatus !== 'MISSING_FILE');
-        const correct = itemsWithFiles.filter(i => i.auditStatus === 'MATCH').length;
-        const accuracy = itemsWithFiles.length > 0 ? (correct / itemsWithFiles.length) * 100 : 0;
-        return { accuracy, duration: batchStats.totalDuration };
+        if (!project) return { accuracy: 0, duration: 0, parsed: 0, total: 0 };
+        // Only rows that are fully parsed (SUCCESS/ERROR, not PENDING/PROCESSING) and not pure Invoice/non-TW docs
+        const parsed = auditList.filter(i => {
+            if (i.auditStatus === 'MISSING_FILE') return false; // no file
+            if (!i.file || i.file.status === 'PENDING' || i.file.status === 'PROCESSING') return false;
+            // Exclude foreign Invoice type (no meaningful TW audit)
+            if (i.ocr?.error_code === 'NOT_INVOICE' || i.ocr?.document_type === 'Invoice' || i.ocr?.voucher_type === 'Invoice') return false;
+            return true;
+        });
+        const correct = parsed.filter(i => i.auditStatus === 'MATCH').length;
+        const accuracy = parsed.length > 0 ? (correct / parsed.length) * 100 : 0;
+        return { accuracy, duration: batchStats.totalDuration, parsed: parsed.length, total: auditList.length };
     }, [auditList, batchStats.totalDuration]);
 
     const exportAuditReport = () => {
@@ -1068,16 +1074,9 @@ const App: React.FC = () => {
                                     <Lucide.Play className="w-4 h-4" /> 繼續解析 ({project.invoices.filter(inv => inv.status === 'PENDING').length} 筆)
                                 </button>
                             )}
-                            <select
-                                value={selectedModel}
-                                onChange={(e) => setSelectedModel(e.target.value)}
-                                className="bg-gray-50 border border-gray-200 text-gray-700 text-xs rounded-lg p-1.5 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-medium"
-                            >
-                                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast)</option>
-                                <option value="gemini-2.5-flash-hybrid">✨ Hybrid Auto-Escalation</option>
-                                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Accuracy)</option>
-                                <option value="gemini-3.1-flash-lite-preview">Gemini 3.1 Flash-Lite (高頻輕量)</option>
-                            </select>
+                            <span className="bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs rounded-lg px-2.5 py-1.5 font-bold flex items-center gap-1.5">
+                                ⚡ 多重解析策略
+                            </span>
                             <div className="h-4 w-px bg-gray-200 mx-1"></div>
                             <button onClick={() => erpInputRef.current?.click()} className="btn-sm btn-blue">
                                 <Lucide.FileSpreadsheet className="w-3.5 h-3.5" /> 匯入 ERP
@@ -1096,8 +1095,6 @@ const App: React.FC = () => {
                             <button onClick={() => setView('ERROR_REVIEW')} className="btn-sm bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100 hover:border-rose-300 shadow-sm font-bold">
                                 <Lucide.AlertOctagon className="w-3.5 h-3.5" /> 異常檢核
                             </button>
-                            <button onClick={exportAuditReport} className="btn-sm btn-white"><Lucide.FileDown className="w-3.5 h-3.5" /> 報告</button>
-                            <button onClick={() => logger.downloadLogs()} className="btn-sm btn-white text-gray-500" title="下載系統除錯紀錄"><Lucide.Bug className="w-3.5 h-3.5" /></button>
                         </div>
                     </div>
                     {/* Progress Bar */}
@@ -1111,7 +1108,7 @@ const App: React.FC = () => {
                     )}
                 </header>
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-1 flex items-center justify-between text-xs">
-                    <CostDashboard project={project} accuracy={metrics.accuracy} modelName={selectedModel} totalDuration={metrics.duration} />
+                    <CostDashboard project={project} accuracy={metrics.accuracy} modelName={selectedModel} totalDuration={metrics.duration} parsed={metrics.parsed} total={metrics.total} />
                     {progress.status !== 'IDLE' && (
                         <div className="flex items-center gap-3">
                             <span className="font-mono font-bold text-indigo-600 flex items-center gap-2">
@@ -1230,12 +1227,19 @@ const App: React.FC = () => {
                                                         {!isPending && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
                                                         {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
                                                         
-                                                        {row.ocr?.document_type && !isMissing && (
-                                                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded leading-none text-center whitespace-nowrap overflow-hidden text-ellipsis max-w-full ${row.ocr.document_type === '統一發票' ? 'bg-blue-100 text-blue-700' :
-                                                                    row.ocr.document_type === '進口報單' || row.ocr.document_type.includes('海關') ? 'bg-teal-100 text-teal-700' :
-                                                                        'bg-purple-100 text-purple-700'
-                                                                }`} title={row.ocr.document_type}>
-                                                                {row.ocr.document_type.length > 6 ? row.ocr.document_type.substring(0, 5) + '..' : row.ocr.document_type}
+                                                        {!isMissing && (row.ocr?.voucher_type || row.ocr?.document_type) && (
+                                                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded leading-none text-center whitespace-nowrap ${
+                                                                row.ocr?.voucher_type === '三聯手寫' ? 'bg-amber-100 text-amber-800' :
+                                                                row.ocr?.voucher_type === '三聯收銀' ? 'bg-blue-100 text-blue-700' :
+                                                                row.ocr?.voucher_type === '三聯電子' ? 'bg-indigo-100 text-indigo-700' :
+                                                                row.ocr?.voucher_type === '二聯收銀' ? 'bg-purple-100 text-purple-700' :
+                                                                row.ocr?.voucher_type === '收據' ? 'bg-gray-100 text-gray-600' :
+                                                                row.ocr?.voucher_type === '車票' ? 'bg-green-100 text-green-700' :
+                                                                row.ocr?.voucher_type === 'Invoice' ? 'bg-rose-100 text-rose-700' :
+                                                                row.ocr?.document_type === '進口報單' || (row.ocr?.document_type || '').includes('海關') ? 'bg-teal-100 text-teal-700' :
+                                                                'bg-gray-100 text-gray-500'
+                                                            }`} title={row.ocr?.voucher_type || row.ocr?.document_type}>
+                                                                {row.ocr?.voucher_type || (row.ocr?.document_type && row.ocr.document_type.length > 6 ? row.ocr.document_type.substring(0, 5) + '..' : row.ocr?.document_type)}
                                                             </span>
                                                         )}
 
@@ -1272,6 +1276,7 @@ const App: React.FC = () => {
                                                     {row.ocr?.tax_code ? (
                                                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
                                                             row.ocr.tax_code === 'T300' ? 'bg-amber-100 text-amber-700' :
+                                                            row.ocr.tax_code === 'T301' ? 'bg-indigo-100 text-indigo-700' :
                                                             row.ocr.tax_code === 'T302' ? 'bg-blue-100 text-blue-700' :
                                                             row.ocr.tax_code === 'T400' ? 'bg-teal-100 text-teal-700' :
                                                             row.ocr.tax_code === 'T500' ? 'bg-purple-100 text-purple-700' :

@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { DollarSign, Zap, BarChart3, TrendingDown } from 'lucide-react';
+import { Zap, BarChart3, CheckCircle2 } from 'lucide-react';
 import { Project } from '../types';
 
 interface CostDashboardProps {
@@ -8,33 +8,12 @@ interface CostDashboardProps {
     accuracy: number; // 0-100
     modelName: string;
     totalDuration: number; // ms
+    parsed: number;
+    total: number;
 }
 
-const CostDashboard: React.FC<CostDashboardProps> = ({ project, accuracy, modelName, totalDuration }) => {
+const CostDashboard: React.FC<CostDashboardProps> = ({ project, accuracy, totalDuration, parsed, total }) => {
     if (!project) return null;
-
-    // Calculate stats
-    const totalInvoices = project.invoices.filter(i => i.status === 'SUCCESS').length;
-    let totalInputTokens = 0;
-    let totalOutputTokens = 0;
-    let totalCost = 0;
-
-    project.invoices.forEach(inv => {
-        inv.data.forEach(d => {
-            if (d.usage_metadata) {
-                totalInputTokens += d.usage_metadata.promptTokenCount;
-                totalOutputTokens += d.usage_metadata.candidatesTokenCount;
-                totalCost += d.usage_metadata.cost_usd || 0;
-            }
-        });
-    });
-
-    // Compare to Pro Model (approx 50x more expensive)
-    // Pro Pricing (approx): Input $1.25/M, Output $5.00/M
-    // Flash Pricing: Input $0.075/M, Output $0.30/M
-    const proCost = (totalInputTokens / 1000000 * 1.25) + (totalOutputTokens / 1000000 * 5.00);
-    const savings = proCost - totalCost;
-    const savingsPercent = proCost > 0 ? (savings / proCost) * 100 : 0;
 
     const formatDuration = (ms: number) => {
         if (ms < 1000) return `${ms}ms`;
@@ -44,48 +23,47 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ project, accuracy, modelN
         return `${sec}s`;
     };
 
+    const isHigh = accuracy >= 90;
+    const isMid = accuracy >= 70 && accuracy < 90;
+
     return (
-        <div className="bg-white border-b border-gray-200 px-4 py-2 flex items-center justify-between text-xs font-mono w-full">
-            <div className="flex items-center gap-6 overflow-x-auto no-scrollbar">
-                {/* Accuracy Badge */}
-                <div className="flex items-center gap-2" title="Audit Accuracy (Match Rate)">
-                    <div className={`p-1 rounded-md ${accuracy === 100 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                        <BarChart3 className="w-3.5 h-3.5" />
-                    </div>
-                    <span className={`font-bold ${accuracy === 100 ? 'text-emerald-700' : 'text-amber-700'}`}>{accuracy.toFixed(1)}%</span>
-                    <span className="text-gray-400">Correct</span>
+        <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center gap-8">
+            {/* Accuracy */}
+            <div className="flex items-center gap-3" title={`已解析 ${parsed} / ${total} 筆（排除外國Invoice及待解析）`}>
+                <div className={`p-1.5 rounded-lg ${isHigh ? 'bg-emerald-100 text-emerald-600' : isMid ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'}`}>
+                    <BarChart3 className="w-5 h-5" />
                 </div>
-
-                {/* Duration Badge */}
-                <div className="flex items-center gap-2" title="Total Batch Processing Time">
-                    <div className="bg-purple-50 p-1 rounded-md text-purple-600"><Zap className="w-3.5 h-3.5" /></div>
-                    <span className="font-bold text-slate-700">{formatDuration(totalDuration)}</span>
-                    <span className="text-gray-400">Time</span>
+                <div className="flex flex-col leading-none">
+                    <span className={`text-2xl font-extrabold font-mono ${isHigh ? 'text-emerald-600' : isMid ? 'text-amber-600' : 'text-rose-600'}`}>
+                        {accuracy.toFixed(1)}%
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">對帳正確率 ({parsed}/{total})</span>
                 </div>
-
-                <div className="flex items-center gap-2 text-gray-600" title="Total API Cost">
-                    <div className="bg-emerald-100 p-1 rounded-md text-emerald-600"><DollarSign className="w-3.5 h-3.5" /></div>
-                    <span className="font-bold text-emerald-700">${totalCost.toFixed(5)}</span>
-                    <span className="text-gray-400">Cost</span>
-                </div>
-
-                <div className="flex items-center gap-2 text-gray-600 hidden lg:flex" title="Tokens Used">
-                    <div className="bg-blue-50 p-1 rounded-md text-blue-600"><Zap className="w-3.5 h-3.5" /></div>
-                    <span className="font-bold text-slate-700">{(totalInputTokens + totalOutputTokens).toLocaleString()}</span>
-                    <span className="text-gray-400 hidden xl:inline">Tokens</span>
-                </div>
-
-                {totalCost > 0 && (
-                    <div className="flex items-center gap-2 text-gray-600 hidden xl:flex" title="Estimated Savings vs Gemini Pro">
-                        <div className="bg-indigo-50 p-1 rounded-md text-indigo-600"><TrendingDown className="w-3.5 h-3.5" /></div>
-                        <span className="font-bold text-indigo-600">${savings.toFixed(4)} ({savingsPercent.toFixed(0)}%)</span>
-                        <span className="hidden 2xl:inline text-gray-400">Savings</span>
-                    </div>
-                )}
             </div>
 
-            <div className="flex items-center gap-2 text-gray-400 pl-4 border-l border-gray-100 ml-4 flex-shrink-0">
-                <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-bold">{modelName}</span>
+            <div className="h-8 w-px bg-gray-200" />
+
+            {/* Time */}
+            <div className="flex items-center gap-3" title="批次解析總耗時">
+                <div className="bg-purple-50 p-1.5 rounded-lg text-purple-600">
+                    <Zap className="w-5 h-5" />
+                </div>
+                <div className="flex flex-col leading-none">
+                    <span className="text-2xl font-extrabold font-mono text-slate-700">
+                        {totalDuration > 0 ? formatDuration(totalDuration) : '—'}
+                    </span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">解析耗時</span>
+                </div>
+            </div>
+
+            <div className="h-8 w-px bg-gray-200" />
+
+            {/* Strategy badge */}
+            <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-indigo-500" />
+                <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-lg">
+                    ⚡ 多重解析策略
+                </span>
             </div>
         </div>
     );

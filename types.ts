@@ -32,9 +32,12 @@ export enum VerificationCode {
   UNKNOWN = "UNKNOWN"
 }
 
+export type VoucherType = '三聯手寫' | '三聯收銀' | '三聯電子' | '二聯收銀' | '收據' | '車票' | 'Invoice' | '其他';
+
 export interface InvoiceData {
   document_type: string; // E.g., '統一發票', 'Invoice', '進口報關', 'Receipt', 'Packing List', etc.
-  tax_code: string | null; // 稅別 e.g. 'T300', 'T302', 'T400', 'T500', 'TXXX'
+  voucher_type?: VoucherType; // Fine-grained classification displayed in status column
+  tax_code: string | null; // 稅別 e.g. 'T300', 'T301', 'T302', 'T400', 'T500', 'TXXX'
   invoice_number: string | null;
   invoice_date: string | null;
   seller_name: string;
