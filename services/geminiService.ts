@@ -159,7 +159,7 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     };
 
     const effectiveModel = modelName.includes('hybrid')
-      ? (modelName.startsWith('gemini-2.0') ? 'gemini-2.0-flash' : 'gemini-2.5-flash')
+      ? 'gemini-3-flash-preview'
       : modelName;
 
     // DEBUG LOGGING

@@ -32,7 +32,7 @@ const App: React.FC = () => {
     const [project, setProject] = useState<Project | null>(null);
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);
-    const selectedModel = 'gemini-2.0-flash-hybrid';
+    const selectedModel = 'gemini-3-flash-preview-hybrid';
     const [batchStats, setBatchStats] = useState({ startTime: 0, endTime: 0, totalDuration: 0 });
 
     const [isCreating, setIsCreating] = useState(false);
