@@ -31,6 +31,18 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 - **Date**: Normalize to YYYY-MM-DD. Handle ROC years.
 - **Tax IDs**: Must be 8 digits for Taiwan companies.
 
+### 3. Tax Code Classification (稅別 tax_code)
+Based on the document type and content, assign the correct tax code:
+- **"T300"**: 三聆式手開發票 (3-part hand-written invoice)
+- **"T302"**: 三聆式收銀機發票 (3-part POS/computer-generated invoice)
+- **"T400"**: 海關進口貨物稅費 (customs import tax receipts)
+- **"T500"**: 二聆式收銀機發票 (2-part POS invoice) OR 車票 (transportation tickets: 高鐵、火車、客運、捷運, etc.)
+- **"TXXX"**: All other documents: English "Invoice", 收据 (沒有發票號碼), 免用統一發票收据, 旅行社代收轉付收据, 計程車收据, customs docs
+
+**CRITICAL SKIP RULES** - set error_code to "NOT_INVOICE" for these:
+1. English "Invoice" documents (foreign supplier invoices without TW invoice number)
+2. Transportation tickets (高鐵、火車、客運、捷遊 ticket, etc.) - set tax_code="T500" then skip
+
 ### 2. Output Format
 Return ONLY valid JSON matching the schema.
 Confidence Scoring: For EACH field, assign a score (0-100).
@@ -44,6 +56,11 @@ const invoiceObjectSchema = {
     document_type: {
       type: "STRING",
       description: "Exact document classification. e.g. '統一發票', 'Commercial Invoice', 'Receipt', '進口報單', 'Packing List', etc."
+    },
+    tax_code: {
+      type: "STRING",
+      enum: ["T300", "T302", "T400", "T500", "TXXX"],
+      description: "稅別: T300=三聆手開, T302=三聆機開, T400=海關進口, T500=二聆機開或車票, TXXX=其他(收据/Invoice等)"
     },
     error_code: { type: "STRING", enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
     invoice_number: { type: "STRING" },
@@ -211,7 +228,74 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       if (!item.error_code) item.error_code = "SUCCESS" as any;
       logs.push(`Initial Error Code: ${item.error_code}`);
 
-      // --- 4. DATA ENRICHMENT & VALIDATION (Business Logic) ---
+      // --- TAX CODE CLASSIFICATION ---
+      // Determine tax_code based on document_type if AI didn't assign one
+      if (!item.tax_code) {
+        const dt = (item.document_type || '').toLowerCase();
+        const invNo = item.invoice_number || '';
+        // T400: Customs import
+        if (dt.includes('海關') || dt.includes('customs') || dt.includes('進口報單') || dt.includes('進口報賤') || dt.includes('稅費繳納')) {
+          item.tax_code = 'T400';
+        }
+        // T500: 2-part POS or transit tickets
+        else if (dt.includes('二聆') || dt.includes('2-part') ||
+          dt.includes('高鐵') || dt.includes('火車') || dt.includes('客運') || dt.includes('捷遊') || dt.includes('捷運') ||
+          dt.includes('ticket') || dt.includes('車票') || dt.includes('車票') || dt.includes('交通票')) {
+          item.tax_code = 'T500';
+        }
+        // T300: 3-part hand-written
+        else if (dt.includes('三聆') && (dt.includes('手開') || dt.includes('手开'))) {
+          item.tax_code = 'T300';
+        }
+        // T302: 3-part POS/machine-printed
+        else if (dt.includes('三聆') && (dt.includes('機') || dt.includes('收銀'))) {
+          item.tax_code = 'T302';
+        }
+        // TXXX: English Invoice (foreign), receipts without TW invoice number, etc.
+        else if (
+          item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice' ||
+          dt.includes('收据') || dt.includes('receipt') || dt.includes('免用') ||
+          dt.includes('旅行社') || dt.includes('計程車') || !invNo
+        ) {
+          item.tax_code = 'TXXX';
+        }
+        // 統一發票: Detect sub-type from invoice number presence + context
+        else if (dt.includes('統一發票') || item.document_type === '統一發票') {
+          // Default 3-part machine (most common for B2B)
+          item.tax_code = 'T302';
+        }
+        // Default fallback
+        else {
+          item.tax_code = 'TXXX';
+        }
+        logs.push(`Tax Code Assigned: ${item.tax_code} (from document_type: ${item.document_type})`);
+      }
+
+      // --- SKIP LOGIC for Invoice (foreign) and transit tickets ---
+      const isSkippable = (
+        item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice' ||
+        item.tax_code === 'T500' && (
+          (item.document_type || '').toLowerCase().includes('車票') ||
+          (item.document_type || '').toLowerCase().includes('車票') ||
+          (item.document_type || '').toLowerCase().includes('高鐵') ||
+          (item.document_type || '').toLowerCase().includes('火車') ||
+          (item.document_type || '').toLowerCase().includes('客運') ||
+          (item.document_type || '').toLowerCase().includes('捷遊') ||
+          (item.document_type || '').toLowerCase().includes('捷運') ||
+          (item.document_type || '').toLowerCase().includes('ticket')
+        )
+      );
+      if (isSkippable && item.error_code === ('SUCCESS' as any)) {
+        // Only mark NOT_INVOICE if it's being auto-skipped (not a real TW invoice)
+        // Keep error_code SUCCESS for transit T500 that user needs to see; just flag tax_code
+        if (item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice') {
+          item.error_code = 'NOT_INVOICE' as any;
+          logs.push(`AUTO-SKIP: Foreign Invoice detected. Document is skipped (tax_code=TXXX, NOT_INVOICE).`);
+        } else {
+          logs.push(`INFO: Transit ticket detected (tax_code=T500). No detailed parsing needed.`);
+        }
+      }
+
 
       // A. Seller Tax ID Logic (Database Lookup)
       // If we extracted a name but ID is unclear, try to find in DB

@@ -256,6 +256,7 @@ const App: React.FC = () => {
                 voucher_id: ['傳票編號', '傳票號碼', '單號', 'Voucher', '傳票', 'NO.', '帳款單號'],
                 invoice_number: ['發票號碼', '發票編號', 'Invoice No', '發票', '多發票號碼'],
                 invoice_date: ['發票日期', '日期', 'Date'],
+                tax_code: ['稅別', 'Tax Code', '稅型'],
                 seller_name: ['廠商名稱', '廠商', 'Vendor', '客戶名稱', '摘要'],
                 seller_tax_id: ['統一編號', '統編', 'Tax ID'],
                 amount_sales: ['未稅金額(本幣)(查詢 1 與 fin_apb)', '未稅金額', '銷售額', 'Sales Amount', '未稅'],
@@ -263,7 +264,7 @@ const App: React.FC = () => {
                 amount_total: ['含稅金額(本幣)(查詢 1 與 fin_apb)', '含稅金額', '總額', '總計', 'Total Amount', '金額', '本幣借方金額']
             };
 
-            const fixedIndices = { voucher_id: 1, invoice_date: 2, seller_name: 8, invoice_number: 10, seller_tax_id: 11, amount_sales: 13, amount_tax: 14, amount_total: 15 };
+            const fixedIndices = { voucher_id: 1, invoice_date: 2, tax_code: -1, seller_name: 8, invoice_number: 10, seller_tax_id: 11, amount_sales: 13, amount_tax: 14, amount_total: 15 };
 
             for (let i = 0; i < rows.length; i++) {
                 const row = rows[i];
@@ -313,6 +314,7 @@ const App: React.FC = () => {
                     parsedRecords.push({
                         voucher_id: vId,
                         invoice_date: String(getVal(getIdx('invoice_date')) || ''),
+                        tax_code: String(getVal(getIdx('tax_code')) || ''),
                         invoice_numbers: invArray,
                         seller_name: String(getVal(getIdx('seller_name')) || ''),
                         seller_tax_id: String(getVal(getIdx('seller_tax_id')) || ''),
@@ -1150,19 +1152,23 @@ const App: React.FC = () => {
                             <table className="w-full text-left border-collapse relative">
                                 <thead className="sticky top-0 z-20 shadow-sm text-[11px]">
                                     <tr className="font-black uppercase tracking-widest text-center sticky top-0 z-20">
-                                        <th className="bg-slate-100 py-2 border-b border-r border-gray-200 w-[42%] text-slate-700 shadow-sm" colSpan={6}>ERP 帳務資料</th>
+                                        <th className="bg-slate-100 py-2 border-b border-r border-gray-200 w-[42%] text-slate-700 shadow-sm" colSpan={8}>ERP 帳務資料</th>
                                         <th className="bg-gray-50 py-2 border-b border-r border-gray-200 w-[6%] text-gray-500 shadow-sm">狀態</th>
-                                        <th className="bg-indigo-50 py-2 border-b border-gray-200 w-[52%] text-indigo-700 shadow-sm" colSpan={6}>OCR 辨識結果</th>
+                                        <th className="bg-indigo-50 py-2 border-b border-gray-200 w-[52%] text-indigo-700 shadow-sm" colSpan={8}>OCR 辨識結果</th>
                                     </tr>
                                     <tr className="bg-white border-b border-gray-100 text-gray-400 sticky top-[33px] z-20 shadow-sm">
                                         <th className="pl-4 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">傳票編號</th>
+                                        <th className="px-1 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">發票日期</th>
                                         <th className="px-1 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">發票號碼</th>
+                                        <th className="px-1 py-2 font-bold text-slate-400 bg-slate-50/90 backdrop-blur">稅別</th>
                                         <th className="px-1 py-2 text-right bg-slate-50/90 backdrop-blur">銷售額合計</th>
                                         <th className="px-1 py-2 text-right bg-slate-50/90 backdrop-blur">營業稅</th>
                                         <th className="px-1 py-2 text-right font-bold text-slate-600 bg-slate-50/90 backdrop-blur">總計</th>
                                         <th className="px-1 py-2 text-center border-r bg-slate-50/90 backdrop-blur">統編</th>
                                         <th className="px-1 py-2 text-center border-r bg-white/90 backdrop-blur">比對</th>
-                                        <th className="pl-4 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">OCR 發票號</th>
+                                        <th className="pl-4 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">發票日期</th>
+                                        <th className="px-1 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">OCR 發票號</th>
+                                        <th className="px-1 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">稅別</th>
                                         <th className="px-1 py-2 text-right text-indigo-300 bg-indigo-50/90 backdrop-blur">銷售額合計</th>
                                         <th className="px-1 py-2 text-right text-indigo-300 bg-indigo-50/90 backdrop-blur">營業稅</th>
                                         <th className="px-1 py-2 text-right font-bold text-indigo-500 bg-indigo-50/90 backdrop-blur">總計</th>
@@ -1198,11 +1204,19 @@ const App: React.FC = () => {
                                                         {row.erp?.erpFlagged && <span className="text-[9px] text-amber-700 font-bold bg-amber-100 px-1 rounded">ERP 待確認</span>}
                                                     </div>
                                                 </td>
+                                                <td className="px-1 py-3 font-mono text-slate-400">
+                                                    {row.erp?.invoice_date || '-'}
+                                                </td>
                                                 <td className={`px-1 py-3 font-mono ${row.diffDetails.includes('inv_no') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-400' : 'text-slate-600')}`}>
                                                     {row.erp?.invoice_numbers.length ? (
                                                         <div className="flex flex-col">
                                                             {row.erp.invoice_numbers.map((num, i) => <span key={i}>{num}</span>)}
                                                         </div>
+                                                    ) : '-'}
+                                                </td>
+                                                <td className="px-1 py-3 text-center font-mono">
+                                                    {row.erp?.tax_code ? (
+                                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">{row.erp.tax_code}</span>
                                                     ) : '-'}
                                                 </td>
                                                 <td className={`px-1 py-3 text-right font-mono ${isMissing ? 'text-slate-300' : 'text-slate-500'}`}>{row.erp ? row.erp.amount_sales.toLocaleString() : '-'}</td>
@@ -1235,6 +1249,7 @@ const App: React.FC = () => {
                                                         <>
                                                             {row.file.status === 'PROCESSING' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : (hasOcrButNoFile ? <FileSearch className="w-3.5 h-3.5 text-amber-400" /> : <FileText className="w-3.5 h-3.5 text-indigo-300" />)}
                                                             <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
+                                                                {row.ocr?.invoice_date ? <span className="text-xs text-indigo-300 mr-1">{row.ocr.invoice_date}</span> : null}
                                                                 {row.ocr?.error_code === 'BLURRY' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.EyeOff className="w-3 h-3" /> 影像模糊</span> :
                                                                     row.ocr?.error_code === 'NOT_INVOICE' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.XCircle className="w-3 h-3" /> 非發票</span> :
                                                                         (row.ocr?.invoice_number || (row.file.status === 'PROCESSING' ? '...' :
@@ -1252,6 +1267,17 @@ const App: React.FC = () => {
                                                             )}
                                                         </>
                                                     ) : <span className="text-gray-300 text-xs italic">等待上傳...</span>}
+                                                </td>
+                                                <td className="px-1 py-3 text-center font-mono">
+                                                    {row.ocr?.tax_code ? (
+                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                                                            row.ocr.tax_code === 'T300' ? 'bg-amber-100 text-amber-700' :
+                                                            row.ocr.tax_code === 'T302' ? 'bg-blue-100 text-blue-700' :
+                                                            row.ocr.tax_code === 'T400' ? 'bg-teal-100 text-teal-700' :
+                                                            row.ocr.tax_code === 'T500' ? 'bg-purple-100 text-purple-700' :
+                                                            'bg-gray-100 text-gray-500'
+                                                        }`}>{row.ocr.tax_code}</span>
+                                                    ) : '-'}
                                                 </td>
                                                 <td className="px-1 py-3 text-right font-mono text-indigo-400">
                                                     {row.ocr ? (

@@ -34,6 +34,7 @@ export enum VerificationCode {
 
 export interface InvoiceData {
   document_type: string; // E.g., '統一發票', 'Invoice', '進口報關', 'Receipt', 'Packing List', etc.
+  tax_code: string | null; // 稅別 e.g. 'T300', 'T302', 'T400', 'T500', 'TXXX'
   invoice_number: string | null;
   invoice_date: string | null;
   seller_name: string;
@@ -71,6 +72,7 @@ export interface ExpectedERP {
 export interface ERPRecord {
   voucher_id: string;      // 帳款單號 (Key)
   invoice_date: string;    // 發票日期
+  tax_code: string;        // 稅別 e.g. 'T300', 'T302', 'T400', 'T500', 'TXXX'
   invoice_numbers: string[];  // 發票號碼 (Array to support multiple invoices per voucher)
   seller_name: string;     // 廠商簡稱
   seller_tax_id: string;   // 廠商統一編號
