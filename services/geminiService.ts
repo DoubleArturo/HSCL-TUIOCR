@@ -21,7 +21,7 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 1. **"統一發票"** - If it is a standard Taiwan GUI (e.g. 2 Letters + 8 Digits, has "電子發票證明聯", QR codes, "載具"). ALWAYS output exactly "統一發票".
 2. **"進口報單" or "海關進口快遞貨物稅費繳納證明"** - Output exactly what the document states.
 3. **Specific Document Names** - Provide the exact name: "Invoice", "Commercial Invoice", "Receipt", "Debit Note", etc.
-4. **"非發票" (Delivery Notes / Packing Lists)** - If it is a "銷貨單", "出貨單", "Packing List", "出貨憑證", "估價單" (documents without finalized tax/sales amounts or are just delivery proofs), output exactly "Packing List" or "Delivery Note". 
+4. **"非發票" (Delivery Notes / Packing Lists / Order Documents)** - If it is a "銷貨單", "出貨單", "送貨單", "訂單出貨憑證", "出貨通知單", "Packing List", "出貨憑證", "估價單", "驗收單", "收料單" (documents without finalized tax/sales amounts or are just delivery proofs), set error_code="NOT_INVOICE". These are support documents that ACCOMPANY invoices — do NOT extract them as invoices.
 
 ### 1. Field Extraction Rules
 - **Currency**: Extract the currency code (e.g., TWD, USD, EUR, JPY, CNY). If no currency is explicitly listed or context clearly implies NT$, output "TWD".
@@ -45,12 +45,18 @@ Based on the document type and content, assign ONE of the following codes:
 - T302 (三聯收銀): Has "收銀機統一發票" text, shows "(三聯式" or "扣抵聯", NO QR codes, NO "電子發票" text.
 
 **KEY DISTINCTION T300 vs T302**:
-- T300 (手寫): The monetary amounts and buyer info are written by hand/pen. No "收銀機" text. Format 21.
-- T302 (收銀): All amounts are printed by machine. Has "收銀機統一發票" text.
+- T300 (手寫): The monetary amounts and buyer info are written by hand/pen. No "收銀機" text. Format 21. The invoice form has blank lines to fill in — amounts are hand-filled.
+- T302 (收銀): ALL amounts are machine-printed (laser/thermal). Has "收銀機統一發票" text printed on the form itself.
+- ⚠️ MIXED PAGE WARNING: A scanned page may contain BOTH a 三聯手寫 invoice AND a 訂單出貨憑證 (order delivery note) stapled or placed together. In this case:
+  → The 統一發票 portion (with 2-letter+8-digit invoice number, 銷售額, 營業稅, 總計, seller stamp) is the INVOICE — extract it.
+  → The 訂單出貨憑證 / 送貨單 portion (with 買方品號, 規格, 單價, QR code, 出貨通知單號) is a SUPPORT DOCUMENT — completely IGNORE it for field extraction.
+  → If both appear on the same page, classify ONLY from the invoice portion. Do NOT let the 出貨憑證 format influence voucher_type or tax_code.
+  → If the invoice amounts are handwritten → T300 三聯手寫. If machine-printed → T302 三聯收銀.
 
 **CRITICAL SKIP RULES** - set error_code to "NOT_INVOICE" for these:
 1. English "Invoice" documents (foreign supplier invoices without TW invoice number)
 2. Transportation tickets (高鐵、火車、客運、捷遊 ticket, etc.) - set tax_code="T500" then skip
+3. Pure 訂單出貨憑證 / 送貨單 / 出貨通知單 pages with NO attached 統一發票 — these are delivery support docs, not invoices
 
 ### 4. Voucher Type Classification (voucher_type)
 Must be consistent with tax_code:
