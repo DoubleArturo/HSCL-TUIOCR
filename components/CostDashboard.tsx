@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Zap, BarChart3, CheckCircle2 } from 'lucide-react';
 import { Project } from '../types';
@@ -8,11 +7,12 @@ interface CostDashboardProps {
     accuracy: number; // 0-100
     modelName: string;
     totalDuration: number; // ms
-    parsed: number;
+    uploaded: number;
+    missing: number;
     total: number;
 }
 
-const CostDashboard: React.FC<CostDashboardProps> = ({ project, accuracy, totalDuration, parsed, total }) => {
+const CostDashboard: React.FC<CostDashboardProps> = ({ project, accuracy, totalDuration, uploaded, missing, total }) => {
     if (!project) return null;
 
     const formatDuration = (ms: number) => {
@@ -25,19 +25,41 @@ const CostDashboard: React.FC<CostDashboardProps> = ({ project, accuracy, totalD
 
     const isHigh = accuracy >= 90;
     const isMid = accuracy >= 70 && accuracy < 90;
+    const colorClass = isHigh ? 'text-emerald-600' : isMid ? 'text-amber-600' : 'text-rose-600';
+    const bgClass = isHigh ? 'bg-emerald-100 text-emerald-600' : isMid ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600';
 
     return (
         <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center gap-8">
             {/* Accuracy */}
-            <div className="flex items-center gap-3" title={`已解析 ${parsed} / ${total} 筆（排除外國Invoice及待解析）`}>
-                <div className={`p-1.5 rounded-lg ${isHigh ? 'bg-emerald-100 text-emerald-600' : isMid ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'}`}>
+            <div className="flex items-center gap-3">
+                <div className={`p-1.5 rounded-lg ${bgClass}`}>
                     <BarChart3 className="w-5 h-5" />
                 </div>
                 <div className="flex flex-col leading-none">
-                    <span className={`text-2xl font-extrabold font-mono ${isHigh ? 'text-emerald-600' : isMid ? 'text-amber-600' : 'text-rose-600'}`}>
-                        {accuracy.toFixed(1)}%
+                    <span className={`text-2xl font-extrabold font-mono ${colorClass}`}>
+                        {uploaded > 0 ? `${accuracy.toFixed(1)}%` : '—'}
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-0.5">對帳正確率 ({parsed}/{total})</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">OCR正確率（已匯入）</span>
+                </div>
+            </div>
+
+            <div className="h-8 w-px bg-gray-200" />
+
+            {/* Upload breakdown */}
+            <div className="flex items-center gap-4 text-xs font-mono">
+                <div className="flex flex-col items-center leading-none">
+                    <span className="text-lg font-extrabold text-emerald-600">{uploaded}</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">已匯入</span>
+                </div>
+                <div className="text-gray-300 text-lg font-light">/</div>
+                <div className="flex flex-col items-center leading-none">
+                    <span className="text-lg font-extrabold text-rose-400">{missing}</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">未匯入</span>
+                </div>
+                <div className="text-gray-300 text-lg font-light">/</div>
+                <div className="flex flex-col items-center leading-none">
+                    <span className="text-lg font-extrabold text-slate-600">{total}</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">總計</span>
                 </div>
             </div>
 

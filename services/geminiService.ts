@@ -34,14 +34,14 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 ### 3. Tax Code Classification (稅別 tax_code) — 對照 Tiptop 系統
 Based on the document type and content, assign ONE of the following codes:
 - **"T300"**: 三聯式手開統一發票（手寫填入，發票格式21）→ voucher_type="三聯手寫"
-- **"T301"**: 三聯式電子發票（印有「電子發票證明聯」字樣，有QR code，發票格式25，需上傳財政部電子發票平台）→ voucher_type="三聯電子"
-- **"T302"**: 三聯式收銀機統一發票（印有「收銀機統一發票」字樣，三聯式/扣抵聯，發票格式25，無QR code）→ voucher_type="三聯收銀"
+- **"T301"**: 三聯式電子發票（印有「電子發票證明聯」字樣，發票格式25）→ voucher_type="三聯電子"
+- **"T302"**: 三聯式收銀機統一發票（印有「收銀機統一發票」字樣）→ voucher_type="三聯收銀"
 - **"T400"**: 海關進口貨物稅費繳納憑單（customs import tax，發票格式28）
-- **"T500"**: 二聯式收銀機統一發票（印有「收銀機統一發票」字樣，二聯式，發票格式22）OR 車票（高鐵、火車、客運、捷運 ticket）
+- **"T500"**: 二聯式收銀機統一發票（印有「收銀機統一發票」字樣，長條形，發票格式22）OR 車票（台灣鐵路、Metro、高鐵、客運、捷運 ticket）
 - **"TXXX"**: All other: 收據（免用統一發票、計程車收據、停車場）、English Invoice（外國廠商）、旅行社代收轉付收据
 
 **KEY DISTINCTION T301 vs T302**:
-- T301 (三聯電子): MUST have "電子發票證明聯" text AND QR codes printed. Has "格式25" or "格式 25" printed. Needs e-invoice platform upload.
+- T301 (三聯電子): MUST have "電子發票證明聯" text. Has "格式25" or "格式 25" printed. Needs e-invoice platform upload.
 - T302 (三聯收銀): Has "收銀機統一發票" text, shows "(三聯式" or "扣抵聯", NO QR codes, NO "電子發票" text.
 
 **KEY DISTINCTION T300 vs T302**:
@@ -182,7 +182,7 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       promptText += `\nCRITICAL ANTI-HALLUCINATION RULE: You MUST visually verify these numbers are printed on the document.`;
       promptText += `\nIf your initial extraction DOES NOT match these expected ERP totals, you MUST re-examine the image carefully to see if you missed them.\n`;
       promptText += `HOWEVER, if you CANNOT see the number on the image, YOU MUST OUTPUT 0. DO NOT under any circumstances return the ERP number just because it was listed here if it is not printed on the document itself. DO NOT calculate difference to fill in "Tax".\n`;
-      
+
       if (validationRetryCount > 0) {
         promptText += `\nNOTE: This is retry attempt ${validationRetryCount}/3. Previous extraction failed ERP validation. Look closer!\n`;
       }
@@ -460,44 +460,44 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       // SMART GUARD: If the first pass found NO valid invoices (e.g., blurry, packing list),
       // DO NOT escalate to Pro. Escalating is a waste of time for non-invoices.
       if (validInvoices.length > 0) {
-          const ocrTotalSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
-          const ocrSalesSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_sales || 0), 0);
-          const ocrTaxSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax || 0), 0);
+        const ocrTotalSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
+        const ocrSalesSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_sales || 0), 0);
+        const ocrTaxSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax || 0), 0);
 
-          let hasMismatch = false;
-          const mismatchLogs = [];
+        let hasMismatch = false;
+        const mismatchLogs = [];
 
-          if (expectedERP.amount_total !== undefined && expectedERP.amount_total !== 0 && Math.abs(ocrTotalSum - expectedERP.amount_total) > 1) {
-            hasMismatch = true;
-            mismatchLogs.push(`Total mismatch (OCR: ${ocrTotalSum}, ERP: ${expectedERP.amount_total})`);
-          }
-          if (expectedERP.amount_sales !== undefined && expectedERP.amount_sales !== 0 && Math.abs(ocrSalesSum - expectedERP.amount_sales) > 1) {
-            hasMismatch = true;
-            mismatchLogs.push(`Sales mismatch (OCR: ${ocrSalesSum}, ERP: ${expectedERP.amount_sales})`);
-          }
-          if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1) {
-            hasMismatch = true;
-            mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
-          }
+        if (expectedERP.amount_total !== undefined && expectedERP.amount_total !== 0 && Math.abs(ocrTotalSum - expectedERP.amount_total) > 1) {
+          hasMismatch = true;
+          mismatchLogs.push(`Total mismatch (OCR: ${ocrTotalSum}, ERP: ${expectedERP.amount_total})`);
+        }
+        if (expectedERP.amount_sales !== undefined && expectedERP.amount_sales !== 0 && Math.abs(ocrSalesSum - expectedERP.amount_sales) > 1) {
+          hasMismatch = true;
+          mismatchLogs.push(`Sales mismatch (OCR: ${ocrSalesSum}, ERP: ${expectedERP.amount_sales})`);
+        }
+        if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1) {
+          hasMismatch = true;
+          mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
+        }
 
-          if (hasMismatch) {
-            console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1 with gemini-2.5-pro...`);
-            
-            // ESCALATION: Use the much smarter (but slower) Pro model for the single validation retry
-            const nextModel = 'gemini-2.5-pro';
+        if (hasMismatch) {
+          console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1 with gemini-2.5-pro...`);
 
-            // Recursive call with Pro model
-            const retryResults = await analyzeInvoice(base64Data, mimeType, nextModel, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
+          // ESCALATION: Use the much smarter (but slower) Pro model for the single validation retry
+          const nextModel = 'gemini-2.5-pro';
 
-            // Prepend escalation log to trace_logs
-            return retryResults.map(item => {
-              const log = `[System] Escapated to PRO (Attempt ${validationRetryCount + 1}) due to ERP mismatch: ${mismatchLogs.join(', ')}.`;
-              item.trace_logs = [log, ...(item.trace_logs || [])];
-              return item;
-            });
-          }
+          // Recursive call with Pro model
+          const retryResults = await analyzeInvoice(base64Data, mimeType, nextModel, retryCount, knownSellers, expectedERP, validationRetryCount + 1);
+
+          // Prepend escalation log to trace_logs
+          return retryResults.map(item => {
+            const log = `[System] Escapated to PRO (Attempt ${validationRetryCount + 1}) due to ERP mismatch: ${mismatchLogs.join(', ')}.`;
+            item.trace_logs = [log, ...(item.trace_logs || [])];
+            return item;
+          });
+        }
       } else {
-         console.log(`[Validation Guard] Skipping Pro escalation because no valid invoice data was found initially.`);
+        console.log(`[Validation Guard] Skipping Pro escalation because no valid invoice data was found initially.`);
       }
     }
 

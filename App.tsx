@@ -818,7 +818,7 @@ const App: React.FC = () => {
                     )}
                 </header>
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-1 flex items-center justify-between text-xs">
-                    <CostDashboard project={project} accuracy={metrics.accuracy} modelName={selectedModel} totalDuration={metrics.duration} parsed={metrics.parsed} total={metrics.total} />
+                    <CostDashboard project={project} accuracy={metrics.accuracy} modelName={selectedModel} totalDuration={metrics.duration} uploaded={metrics.uploaded} missing={metrics.missing} total={metrics.total} />
                     {progress.status !== 'IDLE' && (
                         <div className="flex items-center gap-3">
                             <span className="font-mono font-bold text-indigo-600 flex items-center gap-2">
