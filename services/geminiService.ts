@@ -45,13 +45,24 @@ Based on the document type and content, assign ONE of the following codes:
 - T302 (三聯收銀): Has "收銀機統一發票" text, shows "(三聯式" or "扣抵聯", NO QR codes, NO "電子發票" text.
 
 **KEY DISTINCTION T300 vs T302**:
-- T300 (手寫): The monetary amounts and buyer info are written by hand/pen. No "收銀機" text. Format 21. The invoice form has blank lines to fill in — amounts are hand-filled.
-- T302 (收銀): ALL amounts are machine-printed (laser/thermal). Has "收銀機統一發票" text printed on the form itself.
-- ⚠️ MIXED PAGE WARNING: A scanned page may contain BOTH a 三聯手寫 invoice AND a 訂單出貨憑證 (order delivery note) stapled or placed together. In this case:
-  → The 統一發票 portion (with 2-letter+8-digit invoice number, 銷售額, 營業稅, 總計, seller stamp) is the INVOICE — extract it.
-  → The 訂單出貨憑證 / 送貨單 portion (with 買方品號, 規格, 單價, QR code, 出貨通知單號) is a SUPPORT DOCUMENT — completely IGNORE it for field extraction.
-  → If both appear on the same page, classify ONLY from the invoice portion. Do NOT let the 出貨憑證 format influence voucher_type or tax_code.
-  → If the invoice amounts are handwritten → T300 三聯手寫. If machine-printed → T302 三聯收銀.
+- T300 (手寫): The monetary amounts and buyer info are written by hand/pen/ink. No "收銀機" text. Format 21. The invoice form has blank lines to fill in — amounts are hand-filled.
+- T302 (收銀): ALL amounts are machine-printed (laser/thermal). **HARD REQUIREMENT: the text "收銀機統一發票" MUST appear printed on the invoice form itself. If you cannot find "收銀機統一發票" on the document → it is NOT T302. Do not assign T302 just because a delivery note on the same page is machine-printed.**
+
+- ⚠️ MIXED PAGE WARNING — THIS IS VERY COMMON: A scanned PDF page frequently contains BOTH a 三聯手寫 invoice (pink/red paper, handwritten amounts) AND a 訂單出貨憑證 / 送貨單 (printed delivery note with item table, QR code, 買方品號, 規格, 單價) placed or stapled together and scanned as one image.
+
+  **STEP 1 — LOCATE the 統一發票**: Find the form that has: (a) a 2-letter + 8-digit invoice number (e.g. VT44914261), (b) labeled cells for 銷售額合計, 營業稅, and 總計 or 應付金額, (c) a government-format invoice grid.
+
+  **STEP 2 — IGNORE the 訂單出貨憑證**: The delivery note has item codes (料號), quantities (數量), unit prices (單價), QR codes, and a company-specific document number (e.g. P02-PB0088). It is a support document. **NEVER extract amounts from it. NEVER let its machine-printed appearance influence your tax_code or voucher_type.**
+
+  **STEP 3 — CLASSIFY from the invoice only**:
+  → If the invoice amounts are written in ink/pen (hand-filled) → T300 三聯手寫, regardless of how the delivery note looks.
+  → If "收銀機統一發票" is printed on the invoice form AND all amounts are machine-printed → T302 三聯收銀.
+  → When in doubt between T300 and T302: if ANY amount cell appears hand-filled → choose T300.
+
+  **STEP 4 — EXTRACT amounts from the invoice grid ONLY**:
+  → 銷售額 (sales) comes from the 銷售額合計 / 未稅金額 cell of the 統一發票.
+  → 營業稅 (tax) comes from the 營業稅 cell of the 統一發票.
+  → NEVER use amounts from the 訂單出貨憑證's 金額 column, 含稅金額, or 稅額 fields.
 
 **CRITICAL SKIP RULES** - set error_code to "NOT_INVOICE" for these:
 1. English "Invoice" documents (foreign supplier invoices without TW invoice number)
@@ -62,7 +73,7 @@ Based on the document type and content, assign ONE of the following codes:
 Must be consistent with tax_code:
 - **"三聯手寫"**: T300 — 手寫填入三聯發票，格式21
 - **"三聯收銀"**: T302 — 收銀機三聯發票，格式25，無QR code
-- **"三聯電子"**: T301 — 電子發票證明聯，格式25，有QR code
+- **"三聯電子"**: T301 — 電子發票證明聯，格式25
 - **"二聯收銀"**: T500 — 收銀機二聯發票，格式22
 - **"收據"**: TXXX — 各類收據（計程車、停車場、免用統一發票）
 - **"車票"**: T500 — 高鐵/火車/客運/捷運票券
@@ -91,7 +102,7 @@ const invoiceObjectSchema = {
     tax_code: {
       type: "STRING",
       enum: ["T300", "T301", "T302", "T400", "T500", "TXXX"],
-      description: "稅別: T300=三聆手開(格21), T301=三聆電子(格25+QR), T302=三聆收銀(格25), T400=海關進口(格28), T500=二聆收銀(格22)或車票, TXXX=其他"
+      description: "稅別: T300=三聆手開(格21), T301=三聆電子(格25/證明聯), T302=三聆收銀(格25), T400=海關進口(格28), T500=二聆收銀(格22)或車票, TXXX=其他"
     },
     error_code: { type: "STRING", enum: ["SUCCESS", "BLURRY", "NOT_INVOICE", "PARTIAL", "UNKNOWN"] },
     invoice_number: { type: "STRING" },
