@@ -1,28 +1,27 @@
 import React from 'react';
-import { Zap, BarChart3, CheckCircle2, ScanLine } from 'lucide-react';
+import { Zap, CheckCircle2, ShieldAlert, ClipboardCheck } from 'lucide-react';
 import { Project } from '../types';
 
 interface CostDashboardProps {
     project: Project | null;
-    erpMatchRate: number;
-    ocrAccuracy: number;
+    auditCoverage: number;
+    discrepancyCount: number;
     modelName: string;
     totalDuration: number;
     uploaded: number;
     missing: number;
     total: number;
-    erpDiscrepancyCount: number;
 }
 
-function colorClass(pct: number) {
+function coverageColor(pct: number) {
     if (pct >= 90) return { text: 'text-emerald-600', bg: 'bg-emerald-100 text-emerald-600' };
     if (pct >= 70) return { text: 'text-amber-600', bg: 'bg-amber-100 text-amber-600' };
     return { text: 'text-rose-600', bg: 'bg-rose-100 text-rose-600' };
 }
 
 const CostDashboard: React.FC<CostDashboardProps> = ({
-    project, erpMatchRate, ocrAccuracy, totalDuration,
-    uploaded, missing, total, erpDiscrepancyCount,
+    project, auditCoverage, discrepancyCount, totalDuration,
+    uploaded, missing, total,
 }) => {
     if (!project) return null;
 
@@ -33,42 +32,39 @@ const CostDashboard: React.FC<CostDashboardProps> = ({
         return min > 0 ? `${min}m ${sec % 60}s` : `${sec}s`;
     };
 
-    const ocrC = colorClass(ocrAccuracy);
-    const erpC = colorClass(erpMatchRate);
+    const covC = coverageColor(auditCoverage);
 
     return (
         <div className="bg-white border-b border-gray-200 px-6 py-2.5 flex items-center gap-6 flex-wrap">
 
-            {/* OCR Accuracy — primary metric */}
-            <div className="flex items-center gap-3" title="AI辨識正確率：MATCH + 已確認ERP問題的筆數 ÷ 已匯入，反映AI讀取能力">
-                <div className={`p-1.5 rounded-lg ${ocrC.bg}`}>
-                    <ScanLine className="w-5 h-5" />
+            {/* 稽核覆蓋率 */}
+            <div className="flex items-center gap-3" title="稽核覆蓋率：成功核對到實體憑證的帳款比例 = 已匯入 / (已匯入 + 未匯入)">
+                <div className={`p-1.5 rounded-lg ${covC.bg}`}>
+                    <ClipboardCheck className="w-5 h-5" />
                 </div>
                 <div className="flex flex-col leading-none">
-                    <span className={`text-2xl font-extrabold font-mono ${ocrC.text}`}>
-                        {uploaded > 0 ? `${ocrAccuracy.toFixed(1)}%` : '—'}
+                    <span className={`text-2xl font-extrabold font-mono ${covC.text}`}>
+                        {(uploaded + missing) > 0 ? `${auditCoverage.toFixed(1)}%` : '—'}
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-0.5">
-                        AI辨識率
-                        {erpDiscrepancyCount > 0 && (
-                            <span className="ml-1 text-indigo-400">(含{erpDiscrepancyCount}筆ERP問題)</span>
-                        )}
-                    </span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">稽核覆蓋率</span>
                 </div>
             </div>
 
             <div className="h-8 w-px bg-gray-200" />
 
-            {/* ERP Match Rate — secondary metric */}
-            <div className="flex items-center gap-3" title="ERP比對正確率：MATCH ÷ 已匯入，受ERP資料品質影響">
-                <div className={`p-1.5 rounded-lg ${erpC.bg}`}>
-                    <BarChart3 className="w-5 h-5" />
+            {/* 異常捕獲數 */}
+            <div className="flex items-center gap-3" title="異常捕獲數：發現的憑證與ERP資料不一致筆數（需人工確認）">
+                <div className={`p-1.5 rounded-lg ${discrepancyCount > 0 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                    <ShieldAlert className="w-5 h-5" />
                 </div>
                 <div className="flex flex-col leading-none">
-                    <span className={`text-2xl font-extrabold font-mono ${erpC.text}`}>
-                        {uploaded > 0 ? `${erpMatchRate.toFixed(1)}%` : '—'}
+                    <span className={`text-2xl font-extrabold font-mono ${discrepancyCount > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {uploaded > 0 ? discrepancyCount : '—'}
                     </span>
-                    <span className="text-[10px] text-gray-400 mt-0.5">ERP比對率</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">
+                        異常捕獲
+                        {uploaded > 0 && <span className="ml-1 text-gray-300">/ {uploaded} 筆</span>}
+                    </span>
                 </div>
             </div>
 

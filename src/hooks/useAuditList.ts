@@ -2,18 +2,18 @@ import { useMemo } from 'react';
 import type { Project, AuditRow } from '../../types';
 import { computeAuditRows } from '../lib/auditLogic';
 
+const REVIEWABLE_DIFF_KEYS = ['date', 'amount', 'inv_no', 'tax_code', 'tax_id', 'tax_id_unclear'];
+
 export interface AuditMetrics {
-  /** ERP比對正確率 = MATCH / 已匯入（受ERP資料品質影響） */
-  erpMatchRate: number;
-  /** AI辨識正確率 = (MATCH + 標記為ERP問題) / 已匯入（純反映AI讀取能力） */
-  ocrAccuracy: number;
+  /** 稽核覆蓋率 = 已匯入 / (已匯入 + 未匯入)，反映有多少比例的帳款成功核對到實體憑證 */
+  auditCoverage: number;
+  /** 異常捕獲數：MISMATCH 中含有真實 diff key 的絕對筆數 */
+  discrepancyCount: number;
   duration: number;
   /** 已匯入憑證數（有檔案、已完成解析、排除外國Invoice、排除純no_match_found） */
   uploaded: number;
   /** 未匯入憑證數（MISSING_FILE） */
   missing: number;
-  /** 標記為ERP問題的筆數 */
-  erpDiscrepancyCount: number;
   /** auditList 總行數 */
   total: number;
 }
@@ -31,7 +31,7 @@ export function useAuditList(project: Project | null, batchDuration: number): { 
   }, [project]);
 
   const metrics = useMemo<AuditMetrics>(() => {
-    const empty: AuditMetrics = { erpMatchRate: 0, ocrAccuracy: 0, duration: 0, uploaded: 0, missing: 0, erpDiscrepancyCount: 0, total: 0 };
+    const empty: AuditMetrics = { auditCoverage: 0, discrepancyCount: 0, duration: 0, uploaded: 0, missing: 0, total: 0 };
     if (!project) return empty;
 
     const missing = auditList.filter(r => r.auditStatus === 'MISSING_FILE').length;
@@ -41,29 +41,24 @@ export function useAuditList(project: Project | null, batchDuration: number): { 
       if (row.auditStatus === 'MISSING_FILE') return false;
       if (!row.file || row.file.status === 'PENDING' || row.file.status === 'PROCESSING') return false;
       if (isInvoiceType(row)) return false;
-      // Exclude rows where the ONLY diff is no_match_found — file/ERP naming issue, not an OCR error
       if (row.auditStatus === 'MISMATCH' && row.diffDetails.length === 1 && row.diffDetails[0] === 'no_match_found') return false;
       return true;
     });
 
-    const matchCount = uploaded.filter(r => r.auditStatus === 'MATCH').length;
-    // Rows that are MISMATCH but user confirmed it's ERP data error (not OCR error)
-    const erpDiscrepancyRows = uploaded.filter(r =>
-      r.auditStatus === 'MISMATCH' && r.erp?.erp_discrepancy === true
-    );
-
     const n = uploaded.length;
-    const erpMatchRate = n > 0 ? (matchCount / n) * 100 : 0;
-    // OCR accuracy counts both MATCH and confirmed-ERP-discrepancy as "AI read correctly"
-    const ocrAccuracy = n > 0 ? ((matchCount + erpDiscrepancyRows.length) / n) * 100 : 0;
+    // 稽核覆蓋率 = 已匯入 / (已匯入 + 未匯入)
+    const auditCoverage = (n + missing) > 0 ? (n / (n + missing)) * 100 : 0;
+    // 異常捕獲數 = MISMATCH rows with at least one reviewable diff key
+    const discrepancyCount = uploaded.filter(r =>
+      r.auditStatus === 'MISMATCH' && r.diffDetails.some(d => REVIEWABLE_DIFF_KEYS.includes(d))
+    ).length;
 
     return {
-      erpMatchRate,
-      ocrAccuracy,
+      auditCoverage,
+      discrepancyCount,
       duration: batchDuration,
       uploaded: n,
       missing,
-      erpDiscrepancyCount: erpDiscrepancyRows.length,
       total: auditList.length,
     };
   }, [auditList, batchDuration]);
