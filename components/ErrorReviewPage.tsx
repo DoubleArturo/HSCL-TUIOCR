@@ -9,10 +9,12 @@ interface Props {
     auditList: AuditRow[];
     onBack: () => void;
     onUpdateInvoice: (id: string, updatedData: InvoiceData) => void;
+    onToggleErpDiscrepancy: (voucherId: string) => void;
 }
 
 // All possible diff keys in display order
-const DIFF_KEYS = ['date', 'amount', 'inv_no', 'tax_code', 'tax_id', 'tax_id_unclear', 'no_match_found'] as const;
+// no_match_found = file/ERP naming issue, not an OCR error — excluded from review
+const DIFF_KEYS = ['date', 'amount', 'inv_no', 'tax_code', 'tax_id', 'tax_id_unclear'] as const;
 type DiffKey = typeof DIFF_KEYS[number];
 
 const DIFF_LABELS: Record<DiffKey, string> = {
@@ -22,7 +24,6 @@ const DIFF_LABELS: Record<DiffKey, string> = {
     tax_code: '稅別不符',
     tax_id: '統編不符',
     tax_id_unclear: '統編模糊',
-    no_match_found: '找不到對應',
 };
 
 const DIFF_COLORS: Record<DiffKey, string> = {
@@ -32,7 +33,6 @@ const DIFF_COLORS: Record<DiffKey, string> = {
     tax_code: 'bg-purple-100 text-purple-700',
     tax_id: 'bg-orange-100 text-orange-700',
     tax_id_unclear: 'bg-amber-100 text-amber-700',
-    no_match_found: 'bg-gray-100 text-gray-600',
 };
 
 function isInvoiceType(row: AuditRow) {
@@ -41,17 +41,20 @@ function isInvoiceType(row: AuditRow) {
         row.ocr?.document_type === 'Commercial Invoice';
 }
 
-const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdateInvoice }) => {
+const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdateInvoice, onToggleErpDiscrepancy }) => {
     const [activeFilter, setActiveFilter] = useState<DiffKey | 'all'>('all');
     const [selectedIndex, setSelectedIndex] = useState(0);
 
-    // Build error rows: only MISMATCH rows, excluding Invoice type
+    // Build error rows: only MISMATCH rows with real OCR-level diffs
+    // Exclude: Invoice type, PENDING files, and rows where the only diff is no_match_found
     const errorRows = useMemo(() =>
-        auditList.filter(row =>
-            row.auditStatus === 'MISMATCH' &&
-            !isInvoiceType(row) &&
-            row.diffDetails.length > 0
-        ),
+        auditList.filter(row => {
+            if (row.auditStatus !== 'MISMATCH') return false;
+            if (isInvoiceType(row)) return false;
+            if (!row.file || row.file.status === 'PENDING' || row.file.status === 'PROCESSING') return false;
+            // Only include rows that have at least one reviewable diff key
+            return row.diffDetails.some(d => DIFF_KEYS.includes(d as DiffKey));
+        }),
         [auditList]
     );
 
@@ -166,8 +169,13 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
                                 className={`p-2 rounded-lg border cursor-pointer transition-all ${selectedIndex === idx ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400/30' : 'bg-white border-gray-100 hover:border-gray-300'}`}
                             >
                                 <div className="flex justify-between items-center mb-1">
-                                    <span className="font-bold text-gray-800 text-[11px] truncate max-w-[120px]" title={row.id}>{row.id}</span>
-                                    <span className="text-[9px] text-gray-400 font-mono">#{idx + 1}</span>
+                                    <span className="font-bold text-gray-800 text-[11px] truncate max-w-[100px]" title={row.id}>{row.id}</span>
+                                    <div className="flex items-center gap-1">
+                                        {row.erp?.erp_discrepancy && (
+                                            <span className="text-[8px] font-black px-1 py-px rounded bg-indigo-100 text-indigo-600">ERP問題</span>
+                                        )}
+                                        <span className="text-[9px] text-gray-400 font-mono">#{idx + 1}</span>
+                                    </div>
                                 </div>
                                 <div className="flex flex-wrap gap-0.5">
                                     {row.diffDetails.filter(d => DIFF_KEYS.includes(d as DiffKey)).map(d => (
@@ -187,28 +195,50 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
 
                 {/* Main split view */}
                 {selectedRow && currentEntry && currentInvoiceData ? (
-                    <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
-                        <div className="flex-1 shrink-0 h-full flex flex-col relative min-w-[400px]">
-                            <InvoicePreview
-                                currentEntry={currentEntry}
-                                entries={[currentEntry]}
-                                currentIndex={0}
-                                onSwitchFile={() => {}}
+                    <div className="flex-1 flex flex-col overflow-hidden">
+                        {/* ERP Discrepancy banner */}
+                        {selectedRow.erp && (
+                            <div className={`shrink-0 px-4 py-2 flex items-center justify-between border-b text-xs font-bold transition-colors ${selectedRow.erp.erp_discrepancy ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100'}`}>
+                                <span className={selectedRow.erp.erp_discrepancy ? 'text-indigo-700' : 'text-gray-400'}>
+                                    {selectedRow.erp.erp_discrepancy
+                                        ? '✅ 已標記：此差異來自 ERP 登載問題（AI 辨識正確）'
+                                        : '此筆差異是 ERP 資料問題，還是 AI 讀取錯誤？'}
+                                </span>
+                                <button
+                                    onClick={() => onToggleErpDiscrepancy(selectedRow.erp!.voucher_id)}
+                                    className={`ml-4 px-3 py-1 rounded-lg border font-black text-[11px] transition-colors ${
+                                        selectedRow.erp.erp_discrepancy
+                                            ? 'bg-indigo-100 border-indigo-300 text-indigo-700 hover:bg-indigo-200'
+                                            : 'bg-white border-gray-300 text-gray-600 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700'
+                                    }`}
+                                >
+                                    {selectedRow.erp.erp_discrepancy ? '取消標記' : '標記為 ERP 問題'}
+                                </button>
+                            </div>
+                        )}
+                        <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
+                            <div className="flex-1 shrink-0 h-full flex flex-col relative min-w-[400px]">
+                                <InvoicePreview
+                                    currentEntry={currentEntry}
+                                    entries={[currentEntry]}
+                                    currentIndex={0}
+                                    onSwitchFile={() => {}}
+                                />
+                            </div>
+                            <ErrorReviewFormWrapper
+                                key={`${currentEntry.id}-${invoiceIndex}`}
+                                initialData={currentInvoiceData}
+                                invoiceIndex={invoiceIndex}
+                                totalInvoices={currentEntry.data.length}
+                                entryId={currentEntry.id}
+                                erpRecord={selectedRow.erp}
+                                onUpdate={(newData) => onUpdateInvoice(currentEntry.id, newData)}
+                                onNext={() => {
+                                    if (selectedIndex < filteredRows.length - 1) setSelectedIndex(s => s + 1);
+                                    else alert('已是最後一筆');
+                                }}
                             />
                         </div>
-                        <ErrorReviewFormWrapper
-                            key={`${currentEntry.id}-${invoiceIndex}`}
-                            initialData={currentInvoiceData}
-                            invoiceIndex={invoiceIndex}
-                            totalInvoices={currentEntry.data.length}
-                            entryId={currentEntry.id}
-                            erpRecord={selectedRow.erp}
-                            onUpdate={(newData) => onUpdateInvoice(currentEntry.id, newData)}
-                            onNext={() => {
-                                if (selectedIndex < filteredRows.length - 1) setSelectedIndex(s => s + 1);
-                                else alert('已是最後一筆');
-                            }}
-                        />
                     </div>
                 ) : (
                     <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">

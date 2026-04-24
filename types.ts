@@ -83,7 +83,8 @@ export interface ERPRecord {
   amount_tax: number;      // 稅額
   amount_total: number;    // 含稅金額
   raw_row: string[];
-  erpFlagged?: boolean;    // 使用者標注「ERP 待確認」
+  erpFlagged?: boolean;       // 使用者標注「ERP 待確認」
+  erp_discrepancy?: boolean;  // 使用者確認「差異來自ERP登載問題，非OCR誤讀」
 }
 
 export enum AppStatus {

@@ -229,6 +229,20 @@ const App: React.FC = () => {
         });
     };
 
+    const toggleErpDiscrepancy = (voucherId: string) => {
+        setProject(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                erpData: prev.erpData.map(erp =>
+                    erp.voucher_id === voucherId
+                        ? { ...erp, erp_discrepancy: !erp.erp_discrepancy }
+                        : erp
+                ),
+            };
+        });
+    };
+
     // --- Core Features ---
 
     const handleERPUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -631,7 +645,7 @@ const App: React.FC = () => {
         const csv = buildAuditCSV(auditList, {
             projectName: project?.name ?? '',
             model: selectedModel,
-            accuracy: metrics.accuracy,
+            accuracy: metrics.erpMatchRate,
             duration: metrics.duration,
         });
         downloadCSV(csv, `稽核報告_${project?.name}_${new Date().toISOString().split('T')[0]}.csv`);
@@ -651,6 +665,7 @@ const App: React.FC = () => {
                 auditList={auditList}
                 onBack={() => setView('WORKSPACE')}
                 onUpdateInvoice={handleSave}
+                onToggleErpDiscrepancy={toggleErpDiscrepancy}
             />
         );
     }
@@ -818,7 +833,7 @@ const App: React.FC = () => {
                     )}
                 </header>
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-1 flex items-center justify-between text-xs">
-                    <CostDashboard project={project} accuracy={metrics.accuracy} modelName={selectedModel} totalDuration={metrics.duration} uploaded={metrics.uploaded} missing={metrics.missing} total={metrics.total} />
+                    <CostDashboard project={project} erpMatchRate={metrics.erpMatchRate} ocrAccuracy={metrics.ocrAccuracy} modelName={selectedModel} totalDuration={metrics.duration} uploaded={metrics.uploaded} missing={metrics.missing} total={metrics.total} erpDiscrepancyCount={metrics.erpDiscrepancyCount} />
                     {progress.status !== 'IDLE' && (
                         <div className="flex items-center gap-3">
                             <span className="font-mono font-bold text-indigo-600 flex items-center gap-2">
