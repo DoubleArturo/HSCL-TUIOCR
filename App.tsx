@@ -21,6 +21,9 @@ declare global {
 
 import { fileStorageService } from './services/fileStorageService';
 import { logger } from './services/loggerService';
+import { useAuditList } from './src/hooks/useAuditList';
+import { buildAuditCSV, downloadCSV } from './src/lib/csvExport';
+import { parseERPRows } from './src/lib/erpParser';
 
 const BUYER_TAX_ID_REQUIRED = "16547744";
 
@@ -247,84 +250,7 @@ const App: React.FC = () => {
             const worksheet = workbook.Sheets[firstSheetName];
             const rows: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
 
-            const parsedRecords: ERPRecord[] = [];
-            let headerMap: Record<string, number> | null = null;
-            let headerMatchQuality: Record<string, number> = {};
-
-            // Keywords ordered by specificity (most specific first)
-            const keyMap = {
-                voucher_id: ['傳票編號', '傳票號碼', '單號', 'Voucher', '傳票', 'NO.', '帳款單號'],
-                invoice_number: ['發票號碼', '發票編號', 'Invoice No', '發票', '多發票號碼'],
-                invoice_date: ['發票日期', '日期', 'Date'],
-                tax_code: ['稅別', 'Tax Code', '稅型'],
-                seller_name: ['廠商名稱', '廠商', 'Vendor', '客戶名稱', '摘要'],
-                seller_tax_id: ['統一編號', '統編', 'Tax ID'],
-                amount_sales: ['未稅金額(本幣)(查詢 1 與 fin_apb)', '未稅金額', '銷售額', 'Sales Amount', '未稅'],
-                amount_tax: ['稅額(本幣)(查詢 1 與 fin_apb)', '稅額', '營業稅', 'Tax Amount', '稅金', '稅額(本幣)'],
-                amount_total: ['含稅金額(本幣)(查詢 1 與 fin_apb)', '含稅金額', '總額', '總計', 'Total Amount', '金額', '本幣借方金額']
-            };
-
-            const fixedIndices = { voucher_id: 1, invoice_date: 2, tax_code: -1, seller_name: 8, invoice_number: 10, seller_tax_id: 11, amount_sales: 13, amount_tax: 14, amount_total: 15 };
-
-            for (let i = 0; i < rows.length; i++) {
-                const row = rows[i];
-                if (!headerMap) {
-                    const rowStr = row.map(c => String(c).trim());
-                    // Look for '帳款單號' or '傳票編號' to identify header row
-                    if (rowStr.some(s => keyMap.voucher_id.some(k => s.includes(k)))) {
-                        headerMap = {};
-                        headerMatchQuality = {};
-
-                        rowStr.forEach((col, idx) => {
-                            for (const [key, keywords] of Object.entries(keyMap)) {
-                                // Find the index of the matching keyword (0 is highest priority)
-                                const matchIndex = keywords.findIndex(k => col.includes(k));
-
-                                if (matchIndex !== -1) {
-                                    // If we haven't matched this key yet, OR if this match is better (lower index) than previous
-                                    const currentBest = headerMatchQuality[key] ?? 999;
-                                    if (matchIndex < currentBest) {
-                                        headerMap![key] = idx;
-                                        headerMatchQuality[key] = matchIndex;
-                                    }
-                                }
-                            }
-                        });
-                        continue;
-                    }
-                }
-                const getIdx = (key: keyof typeof fixedIndices) => headerMap ? (headerMap[key] ?? -1) : fixedIndices[key];
-                const getVal = (idx: number) => (idx >= 0 && idx < row.length) ? row[idx] : undefined;
-                const voucherIdRaw = getVal(getIdx('voucher_id'));
-
-                if (voucherIdRaw && String(voucherIdRaw).trim() !== '') {
-                    const vId = String(voucherIdRaw).trim();
-                    if (keyMap.voucher_id.some(k => vId.includes(k))) continue;
-                    const parseAmount = (val: any) => {
-                        if (typeof val === 'number') return val;
-                        if (typeof val === 'string') return parseFloat(val.replace(/,/g, '').trim()) || 0;
-                        return 0;
-                    };
-
-                    // Handle multiple invoice numbers in one column (split by space, comma, slash)
-                    const invRaw = getVal(getIdx('invoice_number'));
-                    const invStr = invRaw ? String(invRaw) : '';
-                    const invArray = invStr.split(/[\s,、;/]+/).filter(Boolean);
-
-                    parsedRecords.push({
-                        voucher_id: vId,
-                        invoice_date: String(getVal(getIdx('invoice_date')) || ''),
-                        tax_code: String(getVal(getIdx('tax_code')) || ''),
-                        invoice_numbers: invArray,
-                        seller_name: String(getVal(getIdx('seller_name')) || ''),
-                        seller_tax_id: String(getVal(getIdx('seller_tax_id')) || ''),
-                        amount_sales: parseAmount(getVal(getIdx('amount_sales'))),
-                        amount_tax: parseAmount(getVal(getIdx('amount_tax'))),
-                        amount_total: parseAmount(getVal(getIdx('amount_total'))),
-                        raw_row: row.map(String)
-                    });
-                }
-            }
+            const parsedRecords = parseERPRows(rows);
 
             if (parsedRecords.length > 0) {
                 updateProjectERP(parsedRecords);
@@ -698,233 +624,17 @@ const App: React.FC = () => {
         setSelectedKey(null);
     };
 
-    // Audit Logic
-    const auditList = useMemo(() => {
-        if (!project) return [];
-
-        const fileMap = new Map<string, InvoiceEntry>(project.invoices.map(i => [i.id, i]));
-        const matchedFileIds = new Set<string>(); // Track files matched to ERP to exclude from Extra List
-
-        const mappedRows = project.erpData.map((erp, index) => {
-            // Smart Matching: Find ALL files that start with the voucher ID
-            // e.g. ERP "G61-PC0008" matches "G61-PC0008-1", "G61-PC0008-2"
-            const matchingFiles: InvoiceEntry[] = [];
-
-            // 1. Try exact match
-            const exact = fileMap.get(erp.voucher_id);
-            if (exact) matchingFiles.push(exact);
-
-            // 2. Try prefix match (only if exact match logic implies checking others, or just always check others?)
-            // User requirement: "Single Tiptop Voucher ... has multiple invoice numbers ... G61-PC0098-1...-4"
-            // So we should collect ALL relevant files.
-            for (const [key, entry] of fileMap.entries()) {
-                if (key === erp.voucher_id) continue; // Already handled
-                if (key.startsWith(erp.voucher_id + '-') || key.startsWith(erp.voucher_id + '_')) {
-                    matchingFiles.push(entry);
-                }
-            }
-
-            // Mark these files as matched
-            matchingFiles.forEach(f => matchedFileIds.add(f.id));
-
-            let auditStatus: 'MATCH' | 'MISMATCH' | 'MISSING_FILE' | 'EXTRA_FILE' = 'MATCH';
-            let diffDetails: string[] = [];
-
-            // Flatten all OCR invoices from the matching files, and deduplicate across files 
-            // (in case the same physical invoice was uploaded twice under different file names)
-            const rawAllOCRInvoices = matchingFiles.flatMap(f => f.data);
-            const allOCRInvoices = rawAllOCRInvoices.filter((inv, index, self) =>
-                index === self.findIndex(t =>
-                    // Only dedupe if it has an invoice number to compare, otherwise keep it (or let valid/invalid filtering handle it)
-                    t.invoice_number === inv.invoice_number &&
-                    t.invoice_number &&
-                    t.amount_total === inv.amount_total
-                ) || !inv.invoice_number // If no invoice number, don't blindly dedupe it here against other empty numbers
-            );
-            let matchedOCRInvoices: InvoiceData[] = [];
-
-            if (matchingFiles.length === 0) {
-                auditStatus = 'MISSING_FILE';
-            } else if (allOCRInvoices.length > 0) {
-                const erpInvNos = erp.invoice_numbers.map(n => n.replace(/[\s-]/g, '').toUpperCase());
-
-                // Find OCR invoices that match ERP numbers (must have non-empty invoice_number)
-                matchedOCRInvoices = allOCRInvoices.filter(inv => {
-                    const ocrInvNo = (inv.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
-                    if (!ocrInvNo) return false; // Never match empty invoice numbers
-                    if (inv.document_type === '非發票' || inv.error_code === 'NOT_INVOICE') return false;
-                    // Check if this OCR invoice matches ANY of the ERP numbers
-                    return erpInvNos.some(erpNo => ocrInvNo.includes(erpNo) || erpNo.includes(ocrInvNo));
-                });
-
-                // If no direct number match, but we have exactly 1 ERP inv and 1 OCR inv (non-非発票), assume match
-                const validOCRInvoices = allOCRInvoices.filter(i => i.document_type !== '非發票' && i.error_code !== 'NOT_INVOICE');
-                if (matchedOCRInvoices.length === 0 && erpInvNos.length === 1 && validOCRInvoices.length === 1) {
-                    matchedOCRInvoices = [validOCRInvoices[0]];
-                }
-
-                // Compare Sums — only valid (non-非発票) invoices count
-                const erpTotal = erp.amount_total;
-                const ocrTotalSum = matchedOCRInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
-
-                if (Math.abs(ocrTotalSum - erpTotal) > 1) diffDetails.push('amount');
-
-                // Validate Tax IDs for all matched invoices (skip for Invoice-type - they have no TW tax IDs)
-                const erpTaxId = erp.seller_tax_id || '';
-                matchedOCRInvoices.forEach(inv => {
-                    if (inv.document_type === 'Invoice') return; // Invoice type has no TW tax IDs
-                    const ocrTaxId = inv.seller_tax_id || '';
-                    if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId) {
-                        if (!diffDetails.includes('tax_id')) diffDetails.push('tax_id');
-                    }
-                    if (ocrTaxId.includes('?')) {
-                        if (!diffDetails.includes('tax_id_unclear')) diffDetails.push('tax_id_unclear');
-                    }
-                });
-
-                // Check if we found ALL expected invoices
-                // (This is hard if 1 ERP entry maps to N files, simpler to check if we matched *something*)
-                // Ideally check count: erpInvNos.length vs matchedOCRInvoices.length
-                if (erpInvNos.length !== matchedOCRInvoices.length) {
-                    diffDetails.push('count_mismatch');
-                }
-
-                if (diffDetails.length > 0) auditStatus = 'MISMATCH';
-
-            } else {
-                auditStatus = 'MISMATCH';
-                diffDetails.push('no_match_found');
-            }
-
-
-            // Construct specific display object. 
-            // For display, we might pick the "first" matched invoice to show details, 
-            // or sum them up. For now, let's use the first one but show sum in Amount.
-            let displayOCR = null;
-            if (matchedOCRInvoices.length > 0) {                    // Filter out 非發票 items and null invoice numbers from the display concat
-                const validInvoices = matchedOCRInvoices.filter(i => i.document_type !== '非發票');
-                const invoiceNumbers = [...new Set(
-                    validInvoices
-                        .map(i => i.invoice_number?.replace(/[\s-]/g, '').toUpperCase())
-                        .filter(Boolean)
-                )].join(' / ');
-                displayOCR = {
-                    ...(validInvoices[0] || matchedOCRInvoices[0]),
-                    amount_total: validInvoices.reduce((sum, i) => sum + (i.amount_total || 0), 0),
-                    amount_sales: validInvoices.reduce((sum, i) => sum + (i.amount_sales || 0), 0),
-                    amount_tax: validInvoices.reduce((sum, i) => sum + (i.amount_tax || 0), 0),
-                    invoice_number: invoiceNumbers
-                };
-            } else if (allOCRInvoices.length > 0) {
-                // Fallback: no number match — show first non-非發票 item so user can see the discrepancy
-                const fallbackInv = allOCRInvoices.find(i => i.document_type !== '非發票') || allOCRInvoices[0];
-                displayOCR = { ...fallbackInv };
-            }
-
-            // Determine the "Primary" matched file for this specific row (if any)
-            let primaryFile = matchingFiles[0] || null;
-            if (matchedOCRInvoices.length > 0) {
-                const targetInv = matchedOCRInvoices[0];
-                const foundFile = matchingFiles.find(f => f.data.includes(targetInv));
-                if (foundFile) primaryFile = foundFile;
-            }
-
-            // Determine index of matched invoice in file
-            let invoiceIndex = 0;
-            if (primaryFile && matchedOCRInvoices.length > 0) {
-                invoiceIndex = primaryFile.data.indexOf(matchedOCRInvoices[0]);
-                if (invoiceIndex === -1) invoiceIndex = 0;
-            }
-
-            return {
-                key: `${erp.voucher_id}_${index}`,
-                id: erp.voucher_id,
-                erp,
-                files: matchingFiles,
-                file: primaryFile,
-                ocr: displayOCR,
-                auditStatus,
-                diffDetails,
-                initialInvoiceIndex: invoiceIndex
-            };
-        });
-
-        // Calculate Extras: Files that were NOT matched to any ERP row
-        const extraFiles = project.invoices
-            .filter(f => !matchedFileIds.has(f.id))
-            .map(f => ({
-                key: `extra_${f.id}`,
-                id: f.id,
-                erp: null,
-                files: [f],
-                file: f,
-                ocr: f.data[0] || null,
-                auditStatus: 'EXTRA_FILE' as const,
-                diffDetails: []
-            }));
-
-        return [...mappedRows, ...extraFiles].sort((a, b) => a.id.localeCompare(b.id));
-    }, [project]);
-
-    // --- Metrics Calculation ---
-    const metrics = useMemo(() => {
-        if (!project) return { accuracy: 0, duration: 0, parsed: 0, total: 0 };
-        // Only rows that are fully parsed (SUCCESS/ERROR, not PENDING/PROCESSING) and not pure Invoice/non-TW docs
-        const parsed = auditList.filter(i => {
-            if (i.auditStatus === 'MISSING_FILE') return false; // no file
-            if (!i.file || i.file.status === 'PENDING' || i.file.status === 'PROCESSING') return false;
-            // Exclude foreign Invoice type (no meaningful TW audit)
-            if (i.ocr?.error_code === 'NOT_INVOICE' || i.ocr?.document_type === 'Invoice' || i.ocr?.voucher_type === 'Invoice') return false;
-            return true;
-        });
-        const correct = parsed.filter(i => i.auditStatus === 'MATCH').length;
-        const accuracy = parsed.length > 0 ? (correct / parsed.length) * 100 : 0;
-        return { accuracy, duration: batchStats.totalDuration, parsed: parsed.length, total: auditList.length };
-    }, [auditList, batchStats.totalDuration]);
+    const { auditList, metrics } = useAuditList(project, batchStats.totalDuration);
 
     const exportAuditReport = () => {
         if (auditList.length === 0) return;
-
-        // Add Summary Header
-        const summary = [
-            `專案名稱,${project?.name}`,
-            `匯出時間,${new Date().toLocaleString()}`,
-            `使用模型,${selectedModel}`,
-            `辨識正確率,${metrics.accuracy.toFixed(1)}%`,
-            `總耗時,${(metrics.duration / 1000).toFixed(1)}秒`,
-            `總筆數,${auditList.length}`,
-            `` // Empty line separator
-        ];
-
-        const headers = ["傳票編號", "狀態", "ERP_發票號碼", "OCR_發票號碼", "買方統編狀態", "ERP_賣方統編", "OCR_賣方統編", "ERP_含稅總額", "OCR_含稅總額", "差異說明"];
-        const rows = auditList.map(item => {
-            const statusMap = { 'MATCH': 'OK', 'MISMATCH': '異常', 'MISSING_FILE': '缺件', 'EXTRA_FILE': '多餘' };
-            return [
-                item.id, statusMap[item.auditStatus],
-                item.erp?.invoice_numbers.join(' / ') || '', item.ocr?.invoice_number || '',
-                item.ocr?.buyer_tax_id === BUYER_TAX_ID_REQUIRED ? 'OK' : item.ocr?.buyer_tax_id,
-                item.erp?.seller_tax_id || '', item.ocr?.seller_tax_id || '',
-                item.erp?.amount_total || 0, item.ocr?.amount_tax || 0, // Changed from amount_sales to amount_tax for consistency
-                item.erp?.amount_total || 0, item.ocr?.amount_total || 0,
-                item.erp?.amount_total || 0, item.ocr?.amount_total || 0,
-                item.diffDetails.map(d => {
-                    if (d === 'amount') return '金額不符';
-                    if (d === 'tax_id') return '賣方統編不符';
-                    if (d === 'buyer_id_error') return '買方統編錯誤';
-                    if (d === 'tax_id_unclear') return '賣方統編不清';
-                    if (d === 'count_mismatch') return '發票數量不符';
-                    if (d === 'no_match_found') return '找不到對應發票';
-                    return d;
-                }).join(';')
-            ].join(',');
+        const csv = buildAuditCSV(auditList, {
+            projectName: project?.name ?? '',
+            model: selectedModel,
+            accuracy: metrics.accuracy,
+            duration: metrics.duration,
         });
-
-        const csvContent = "\ufeff" + [...summary, headers.join(','), ...rows].join('\n');
-
-        const link = document.createElement("a");
-        link.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvContent);
-        link.download = `稽核報告_${project?.name}_${new Date().toISOString().split('T')[0]}.csv`;
-        link.click();
+        downloadCSV(csv, `稽核報告_${project?.name}_${new Date().toISOString().split('T')[0]}.csv`);
     };
 
     const selectedRow = auditList.find(r => r.key === selectedKey);
@@ -1243,9 +953,13 @@ const App: React.FC = () => {
                                                             </span>
                                                         )}
 
+                                                        {isMismatch && row.diffDetails.includes('date') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">日期不符</span>}
                                                         {isMismatch && row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
-                                                        {isMismatch && row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">號碼錯誤</span>}
+                                                        {isMismatch && row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">發票號碼不符</span>}
+                                                        {isMismatch && row.diffDetails.includes('tax_code') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">稅別不符</span>}
+                                                        {isMismatch && row.diffDetails.includes('tax_id') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">統編不符</span>}
                                                         {isMismatch && row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
+                                                        {isMismatch && row.diffDetails.includes('no_match_found') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">找不到對應</span>}
                                                     </div>
                                                 </td>
                                                 <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => row.file && row.file.previewUrl && setSelectedKey(row.key)}>
@@ -1255,7 +969,6 @@ const App: React.FC = () => {
                                                             <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
                                                                 {row.ocr?.invoice_date ? <span className="text-xs text-indigo-300 mr-1">{row.ocr.invoice_date}</span> : null}
                                                                 {row.ocr?.error_code === 'BLURRY' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.EyeOff className="w-3 h-3" /> 影像模糊</span> :
-                                                                    row.ocr?.error_code === 'NOT_INVOICE' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.XCircle className="w-3 h-3" /> 非發票</span> :
                                                                         (row.ocr?.invoice_number || (row.file.status === 'PROCESSING' ? '...' :
                                                                             (row.file.status === 'ERROR' ? <span className="text-rose-500 font-bold" title={row.file.error}>{row.file.error || '辨識失敗'}</span> :
                                                                                 (hasOcrButNoFile ? '需補上傳' : '未對應'))))}
@@ -1263,7 +976,7 @@ const App: React.FC = () => {
                                                             {hasOcrButNoFile && <span className="text-[9px] text-amber-600 bg-amber-50 px-1 rounded">資料已存/缺圖</span>}
                                                             {isPending && (
                                                                 <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleFiles([row.file!]); }}
+                                                                    onClick={(e) => { e.stopPropagation(); handleFiles([row.file!.file]); }}
                                                                     className="ml-2 text-[9px] px-1.5 py-0.5 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-1 transition-colors bg-white font-bold"
                                                                 >
                                                                     <Lucide.Play className="w-2.5 h-2.5" /> 原單續傳

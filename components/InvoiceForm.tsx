@@ -261,7 +261,22 @@ const InvoiceForm: React.FC<Props> = ({
 
                 <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-3">
-                        <div><FieldHeader label="憑證類型" field="document_type" score={100} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-sm font-bold text-indigo-700 bg-indigo-50 border-indigo-200 focus:ring-2 focus:ring-indigo-500 transition-all outline-none`} value={formData.document_type || ''} onChange={(e) => handleChange('document_type', e.target.value)} /></div>
+                        <div>
+                            <FieldHeader label="憑證類型" field="document_type" score={100} />
+                            <select
+                                className="w-full border rounded-xl px-3 py-2 text-sm font-bold text-indigo-700 bg-indigo-50 border-indigo-200 focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                                value={formData.voucher_type || formData.document_type || ''}
+                                onChange={(e) => handleChange('voucher_type', e.target.value)}
+                            >
+                                <option value="三聯收銀">三聯收銀</option>
+                                <option value="三聯手寫">三聯手寫</option>
+                                <option value="三聯電子">三聯電子</option>
+                                <option value="二聯收銀">二聯收銀</option>
+                                <option value="收據">收據</option>
+                                <option value="Invoice">Invoice</option>
+                                <option value="非發票">非發票</option>
+                            </select>
+                        </div>
                         <div><FieldHeader label="憑證號碼" field="invoice_number" score={formData.field_confidence.invoice_number} /><input type="text" className={`w-full border rounded-xl px-3 py-2 font-mono text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_number, 'invoice_number')}`} value={formData.invoice_number || ''} onChange={(e) => handleChange('invoice_number', e.target.value)} /></div>
                     </div>
                     <div>

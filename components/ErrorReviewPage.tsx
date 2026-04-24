@@ -46,6 +46,9 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
 
             row.files.forEach(entry => {
                 entry.data.forEach((inv, idx) => {
+                    // Invoice / Commercial Invoice type: no TW audit applicable
+                    if (inv.voucher_type === 'Invoice' || inv.document_type === 'Invoice' || inv.document_type === 'Commercial Invoice') return;
+
                     const categories: ErrorCategory[] = [];
                     const reasons: string[] = [];
 
