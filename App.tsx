@@ -894,9 +894,10 @@ const App: React.FC = () => {
 
                                         // Override missing visual flag if it's just PENDING
                                         if (isPending) isMissing = false;
+                                        const isInvoiceRow = row.ocr?.voucher_type === 'Invoice' || row.ocr?.document_type === 'Invoice' || row.ocr?.document_type === 'Commercial Invoice';
 
                                         return (
-                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
+                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending && !isInvoiceRow ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
                                                 <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing || isPending ? 'text-slate-400' : 'text-slate-700'}`}>
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{row.id}</span>
@@ -914,7 +915,7 @@ const App: React.FC = () => {
                                                 <td className="px-1 py-3 font-mono text-slate-400">
                                                     {row.erp?.invoice_date || '-'}
                                                 </td>
-                                                <td className={`px-1 py-3 font-mono ${row.diffDetails.includes('inv_no') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-400' : 'text-slate-600')}`}>
+                                                <td className={`px-1 py-3 font-mono ${!isInvoiceRow && row.diffDetails.includes('inv_no') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-400' : 'text-slate-600')}`}>
                                                     {row.erp?.invoice_numbers.length ? (
                                                         <div className="flex flex-col">
                                                             {row.erp.invoice_numbers.map((num, i) => <span key={i}>{num}</span>)}
@@ -928,13 +929,14 @@ const App: React.FC = () => {
                                                 </td>
                                                 <td className={`px-1 py-3 text-right font-mono ${isMissing ? 'text-slate-300' : 'text-slate-500'}`}>{row.erp ? row.erp.amount_sales.toLocaleString() : '-'}</td>
                                                 <td className={`px-1 py-3 text-right font-mono ${isMissing ? 'text-slate-300' : 'text-slate-500'}`}>{row.erp ? row.erp.amount_tax.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-right font-mono font-bold ${row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-400' : 'text-slate-800')}`}>{row.erp ? row.erp.amount_total.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
+                                                <td className={`px-1 py-3 text-right font-mono font-bold ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-400' : 'text-slate-800')}`}>{row.erp ? row.erp.amount_total.toLocaleString() : '-'}</td>
+                                                <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${!isInvoiceRow && row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
                                                 <td className="px-1 py-3 text-center border-r border-gray-100 align-middle">
                                                     <div className="flex flex-col items-center gap-1">
                                                         {isPending && <><Lucide.Clock className="w-4 h-4 text-amber-500" /><span className="text-[9px] text-amber-600 font-bold mt-0.5">待解析</span></>}
-                                                        {!isPending && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                                                        {!isPending && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
+                                                        {!isPending && isInvoiceRow && <CheckCircle2 className="w-5 h-5 text-slate-300" />}
+                                                        {!isPending && !isInvoiceRow && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                                                        {!isPending && !isInvoiceRow && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
                                                         {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
                                                         
                                                         {!isMissing && (row.ocr?.voucher_type || row.ocr?.document_type) && (
@@ -953,13 +955,13 @@ const App: React.FC = () => {
                                                             </span>
                                                         )}
 
-                                                        {isMismatch && row.diffDetails.includes('date') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">日期不符</span>}
-                                                        {isMismatch && row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
-                                                        {isMismatch && row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">發票號碼不符</span>}
-                                                        {isMismatch && row.diffDetails.includes('tax_code') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">稅別不符</span>}
-                                                        {isMismatch && row.diffDetails.includes('tax_id') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">統編不符</span>}
-                                                        {isMismatch && row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
-                                                        {isMismatch && row.diffDetails.includes('no_match_found') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">找不到對應</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('date') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">日期不符</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">發票號碼不符</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('tax_code') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">稅別不符</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('tax_id') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">統編不符</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
+                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('no_match_found') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">找不到對應</span>}
                                                     </div>
                                                 </td>
                                                 <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => row.file && row.file.previewUrl && setSelectedKey(row.key)}>
