@@ -1,6 +1,4 @@
-
 import React, { useState, useMemo } from 'react';
-
 import { Project, InvoiceEntry, InvoiceData, AuditRow } from '../types';
 import * as Lucide from 'lucide-react';
 import InvoicePreview from './InvoicePreview';
@@ -13,149 +11,74 @@ interface Props {
     onUpdateInvoice: (id: string, updatedData: InvoiceData) => void;
 }
 
-// Error category types
-type ErrorCategory = 'all' | 'amount_logic' | 'seller_tax_id' | 'other';
+// All possible diff keys in display order
+const DIFF_KEYS = ['date', 'amount', 'inv_no', 'tax_code', 'tax_id', 'tax_id_unclear', 'no_match_found'] as const;
+type DiffKey = typeof DIFF_KEYS[number];
 
-interface ErrorItem {
-    entry: InvoiceEntry;
-    invoiceIndex: number;
-    categories: ErrorCategory[];
-    reasons: string[];
-    erp?: any; // ERP Record
+const DIFF_LABELS: Record<DiffKey, string> = {
+    date: '日期不符',
+    amount: '金額不符',
+    inv_no: '發票號碼不符',
+    tax_code: '稅別不符',
+    tax_id: '統編不符',
+    tax_id_unclear: '統編模糊',
+    no_match_found: '找不到對應',
+};
+
+const DIFF_COLORS: Record<DiffKey, string> = {
+    date: 'bg-amber-100 text-amber-700',
+    amount: 'bg-rose-100 text-rose-700',
+    inv_no: 'bg-rose-100 text-rose-700',
+    tax_code: 'bg-purple-100 text-purple-700',
+    tax_id: 'bg-orange-100 text-orange-700',
+    tax_id_unclear: 'bg-amber-100 text-amber-700',
+    no_match_found: 'bg-gray-100 text-gray-600',
+};
+
+function isInvoiceType(row: AuditRow) {
+    return row.ocr?.voucher_type === 'Invoice' ||
+        row.ocr?.document_type === 'Invoice' ||
+        row.ocr?.document_type === 'Commercial Invoice';
 }
 
-
-
 const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdateInvoice }) => {
-    const [selectedCategory, setSelectedCategory] = useState<ErrorCategory>('all');
-
-    // Comprehensive error categorization
-    const { errorList, categoryCounts } = useMemo(() => {
-        const list: ErrorItem[] = [];
-        const counts: Record<ErrorCategory, number> = {
-            all: 0,
-            amount_logic: 0,
-            seller_tax_id: 0,
-            other: 0
-        };
-
-        // We iterate auditList to ensure we capture ERP mismatches AND intrinsic errors
-        auditList.forEach(row => {
-            // Each AuditRow might contain multiple files (if one ERP matches multiple params)
-            // Or "Extra Files" (no ERP).
-
-            row.files.forEach(entry => {
-                entry.data.forEach((inv, idx) => {
-                    // Invoice / Commercial Invoice type: no TW audit applicable
-                    if (inv.voucher_type === 'Invoice' || inv.document_type === 'Invoice' || inv.document_type === 'Commercial Invoice') return;
-
-                    const categories: ErrorCategory[] = [];
-                    const reasons: string[] = [];
-
-                    // 1. Amount Logic Error (Intrinsic)
-                    if (!inv.verification?.logic_is_valid) {
-                        categories.push('amount_logic');
-                        if (!reasons.includes('金額勾稽错誤')) reasons.push('金額勾稽错誤');
-                        counts.amount_logic++;
-                    }
-
-                    // 2. Seller Tax ID Intrinsic Issues
-                    if (inv.seller_tax_id && (inv.seller_tax_id.includes('?') || inv.seller_tax_id === 'NOT_FOUND')) {
-                        categories.push('seller_tax_id');
-                        if (!reasons.includes('賣方統編不清')) reasons.push('賣方統編不清');
-                        counts.seller_tax_id++;
-                    }
-
-                    // 3. ERP Amount Mismatch
-                    if (row.auditStatus === 'MISMATCH') {
-                        if (row.diffDetails.includes('amount')) {
-                            categories.push('amount_logic');
-                            if (!reasons.includes('ERP金額不符')) reasons.push('ERP金額不符');
-                        }
-                        if (row.diffDetails.includes('tax_id')) {
-                            categories.push('seller_tax_id');
-                            if (!reasons.includes('ERP賣方統編不符')) reasons.push('ERP賣方統編不符');
-                        }
-                    }
-
-                    // 5. Other verification flags
-                    if (inv.verification?.flagged_fields && inv.verification.flagged_fields.length > 0) {
-                        const otherFlags = inv.verification.flagged_fields.filter(
-                            f => !['buyer_tax_id', 'seller_tax_id'].includes(f)
-                        );
-                        if (otherFlags.length > 0 && categories.length === 0) { // Only if no other major errors? Or always?
-                            // Let's always add if it's a flag we haven't covered
-                            categories.push('other');
-                            reasons.push('AI標記異常');
-                            counts.other++;
-                        }
-                    }
-
-                    // Dedupe categories
-                    const uniqueCategories = Array.from(new Set(categories));
-
-                    // Only add if there are errors AND not manually verified
-                    if (uniqueCategories.length > 0 && !inv.manually_verified) {
-                        list.push({ entry, invoiceIndex: idx, categories: uniqueCategories, reasons, erp: row.erp });
-                        counts.all++;
-                    }
-                });
-            });
-        });
-
-        // Deduplicate list? 
-        // auditList rows are unique by definition (One ERP or One Extra).
-        // But `row.files` might overlap? 
-        // App.tsx logic: "matchingFiles" are found.
-        // If one file helps match 2 ERPs (unlikely 1:1 usually), it might appear twice.
-        // But `files.flatMap` in App.tsx suggests N:M?
-        // Let's assume unique enough or acceptable duplication for now.
-        // Actually, let's dedupe by entry.id + index just in case.
-        const uniqueList = list.filter((item, index, self) =>
-            index === self.findIndex((t) => (
-                t.entry.id === item.entry.id && t.invoiceIndex === item.invoiceIndex
-            ))
-        );
-
-        // Recalculate 'all' count based on unique list
-        counts.all = uniqueList.length;
-
-        return { errorList: uniqueList, categoryCounts: counts };
-    }, [auditList]); // Depend on auditList, not project.invoices
-
-
-    // Filter by category
-    const filteredErrorList = useMemo(() => {
-        if (selectedCategory === 'all') return errorList;
-        return errorList.filter(item => item.categories.includes(selectedCategory));
-    }, [errorList, selectedCategory]);
-
+    const [activeFilter, setActiveFilter] = useState<DiffKey | 'all'>('all');
     const [selectedIndex, setSelectedIndex] = useState(0);
 
-    // Reset selected index when filter changes
-    React.useEffect(() => {
-        setSelectedIndex(0);
-    }, [selectedCategory]);
+    // Build error rows: only MISMATCH rows, excluding Invoice type
+    const errorRows = useMemo(() =>
+        auditList.filter(row =>
+            row.auditStatus === 'MISMATCH' &&
+            !isInvoiceType(row) &&
+            row.diffDetails.length > 0
+        ),
+        [auditList]
+    );
 
-    // If list is empty
-    if (filteredErrorList.length === 0 && selectedCategory !== 'all') {
-        return (
-            <div className="h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
-                <div className="bg-white p-12 rounded-3xl shadow-xl text-center max-w-lg">
-                    <div className="bg-blue-100 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <Lucide.Filter className="w-10 h-10 text-blue-600" />
-                    </div>
-                    <h2 className="text-2xl font-black text-gray-800 mb-2">此類別無異常</h2>
-                    <p className="text-gray-500 mb-8">切換到其他類別查看錯誤</p>
-                    <button onClick={() => setSelectedCategory('all')} className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-black transition-colors">
-                        查看全部異常
-                    </button>
-                </div>
-            </div>
-        );
-    }
+    // Count per diff key
+    const keyCounts = useMemo(() => {
+        const counts = {} as Record<DiffKey, number>;
+        for (const key of DIFF_KEYS) counts[key] = 0;
+        for (const row of errorRows) {
+            for (const d of row.diffDetails) {
+                if (d in counts) counts[d as DiffKey]++;
+            }
+        }
+        return counts;
+    }, [errorRows]);
 
-    if (errorList.length === 0) {
+    // Filtered list
+    const filteredRows = useMemo(() =>
+        activeFilter === 'all'
+            ? errorRows
+            : errorRows.filter(row => row.diffDetails.includes(activeFilter)),
+        [errorRows, activeFilter]
+    );
+
+    // Reset selection when filter changes
+    React.useEffect(() => { setSelectedIndex(0); }, [activeFilter]);
+
+    if (errorRows.length === 0) {
         return (
             <div className="h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
                 <div className="bg-white p-12 rounded-3xl shadow-xl text-center max-w-lg">
@@ -163,7 +86,7 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
                         <Lucide.CheckCircle2 className="w-10 h-10 text-emerald-600" />
                     </div>
                     <h2 className="text-2xl font-black text-gray-800 mb-2">太棒了！沒有發現異常</h2>
-                    <p className="text-gray-500 mb-8">所有發票的買方統編與金額邏輯皆正確。</p>
+                    <p className="text-gray-500 mb-8">所有已比對憑證皆符合 ERP 資料。</p>
                     <button onClick={onBack} className="bg-gray-900 text-white px-8 py-3 rounded-xl font-bold hover:bg-black transition-colors">
                         返回專案首頁
                     </button>
@@ -172,155 +95,126 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
         );
     }
 
-    const selectedItem = filteredErrorList[selectedIndex];
-    const currentEntry = selectedItem?.entry;
-    const currentInvoiceData = currentEntry?.data[selectedItem?.invoiceIndex];
+    const selectedRow = filteredRows[selectedIndex];
+    const currentEntry = selectedRow?.file ?? selectedRow?.files[0] ?? null;
+    const invoiceIndex = selectedRow?.initialInvoiceIndex ?? 0;
+    const currentInvoiceData = currentEntry?.data[invoiceIndex];
 
-    // Handler for saving
-    const handleSave = () => {
-        // Current invoice data is modified in place via setFormData wrapper below?
-        // No, InvoiceForm takes formData prop. We need to handle the update.
-        // Wait, InvoiceForm calls setFormData which updates LOCAL state in InvoiceForm? 
-        // No, InvoiceForm is controlled.
-    };
-
-    // We need a local state wrapper for the form data because InvoiceForm expects `setFormData`
-    // But we want to modify the global state eventually.
-    // Actually, let's just make a wrapper that updates the global state immediately?
-    // Or better, local state that syncs like InvoiceEditor.
-
-    // Let's create a wrapper component or just separate logic here.
-    // InvoiceForm expects `formData` and `setFormData`.
-
-    // Use a key to force reset state when switching items
     return (
         <div className="h-screen flex flex-col bg-gray-100 overflow-hidden">
             {/* Header */}
-            <div className="h-16 bg-white border-b flex items-center px-4 justify-between shrink-0 z-50">
+            <div className="h-14 bg-white border-b flex items-center px-4 justify-between shrink-0">
                 <div className="flex items-center gap-3">
                     <button onClick={onBack} className="p-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors">
                         <Lucide.ArrowLeft className="w-5 h-5" />
                     </button>
-                    <div className="h-6 w-px bg-gray-200"></div>
-                    <h1 className="text-lg font-black text-gray-800 flex items-center gap-2">
-                        <Lucide.AlertOctagon className="w-5 h-5 text-rose-500" />
-                        異常檢核列表 ({filteredErrorList.length}筆)
+                    <div className="h-6 w-px bg-gray-200" />
+                    <h1 className="text-base font-black text-gray-800 flex items-center gap-2">
+                        <Lucide.AlertOctagon className="w-4 h-4 text-rose-500" />
+                        異常檢核列表
+                        <span className="text-rose-500">({errorRows.length})</span>
                     </h1>
                 </div>
-                <div className="bg-rose-50 text-rose-600 px-3 py-1 rounded-full text-xs font-bold border border-rose-100">
-                    專注模式：請修正左側原始憑證與右側資料的差異
-                </div>
+                <span className="text-[11px] text-rose-500 font-bold bg-rose-50 border border-rose-100 px-3 py-1 rounded-full">
+                    請對照左側憑證修正右側資料
+                </span>
             </div>
 
             <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar List */}
-                <div className="w-[240px] bg-white border-r border-gray-200 flex flex-col shrink-0 z-40 transition-all duration-300">
-                    {/* Category Filters */}
-                    <div className="p-3 border-b bg-gradient-to-br from-gray-50 to-white">
-                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">錯誤類別篩選</label>
-                        <div className="relative">
-                            <select
-                                value={selectedCategory}
-                                onChange={(e) => setSelectedCategory(e.target.value as ErrorCategory)}
-                                className="w-full appearance-none bg-white border border-gray-300 text-gray-700 text-xs font-bold rounded-lg py-2 pl-3 pr-8 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm"
+                {/* Sidebar */}
+                <div className="w-56 bg-white border-r border-gray-200 flex flex-col shrink-0">
+
+                    {/* Group filter buttons */}
+                    <div className="p-3 border-b space-y-1">
+                        <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">比對錯誤類型</p>
+
+                        {/* All */}
+                        <button
+                            onClick={() => setActiveFilter('all')}
+                            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${activeFilter === 'all' ? 'bg-slate-800 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                        >
+                            <span>全部異常</span>
+                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${activeFilter === 'all' ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                                {errorRows.length}
+                            </span>
+                        </button>
+
+                        {/* Per diff key — only show keys that have > 0 */}
+                        {DIFF_KEYS.filter(k => keyCounts[k] > 0).map(key => (
+                            <button
+                                key={key}
+                                onClick={() => setActiveFilter(key)}
+                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors ${activeFilter === key ? 'bg-rose-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                             >
-                                <option value="all">全部異常 ({categoryCounts.all})</option>
-                                <option value="amount_logic">金額勾稽錯誤 ({categoryCounts.amount_logic})</option>
-                                <option value="seller_tax_id">賣方統編不清 ({categoryCounts.seller_tax_id})</option>
-                                <option value="other">其他 ({categoryCounts.other})</option>
-                            </select>
-                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-500">
-                                <Lucide.ChevronDown className="w-4 h-4" />
-                            </div>
-                        </div>
+                                <span>{DIFF_LABELS[key]}</span>
+                                <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${activeFilter === key ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-500'}`}>
+                                    {keyCounts[key]}
+                                </span>
+                            </button>
+                        ))}
                     </div>
 
-                    <div className="bg-gray-50 px-3 py-2 border-b">
-                        <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">待處理 ({filteredErrorList.length})</h3>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-2">
-                        {filteredErrorList.map((item, idx) => (
+                    {/* Item list */}
+                    <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                        <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest px-1 pt-1 pb-0.5">
+                            {activeFilter === 'all' ? '全部' : DIFF_LABELS[activeFilter as DiffKey]} ({filteredRows.length})
+                        </p>
+                        {filteredRows.map((row, idx) => (
                             <div
-                                key={`${item.entry.id}_${item.invoiceIndex}`}
+                                key={row.key}
                                 onClick={() => setSelectedIndex(idx)}
-                                className={`p-2.5 rounded-lg border transition-all cursor-pointer hover:shadow-md group relative ${selectedIndex === idx ? 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-500/30' : 'bg-white border-gray-100 hover:border-gray-300'}`}
+                                className={`p-2 rounded-lg border cursor-pointer transition-all ${selectedIndex === idx ? 'bg-indigo-50 border-indigo-300 ring-1 ring-indigo-400/30' : 'bg-white border-gray-100 hover:border-gray-300'}`}
                             >
-                                <div className="flex justify-between items-start mb-1.5">
-                                    <span className="font-bold text-gray-800 text-xs truncate max-w-[140px] block" title={item.entry.id}>{item.entry.id}</span>
-                                    <span className="text-[9px] text-gray-400 font-mono shrink-0">#{idx + 1}</span>
+                                <div className="flex justify-between items-center mb-1">
+                                    <span className="font-bold text-gray-800 text-[11px] truncate max-w-[120px]" title={row.id}>{row.id}</span>
+                                    <span className="text-[9px] text-gray-400 font-mono">#{idx + 1}</span>
                                 </div>
-
-                                <div className="flex flex-wrap gap-1 mb-1.5">
-                                    {item.reasons.map((reason, ridx) => (
-                                        <span key={ridx} className={`text-[9px] font-black px-1.5 py-0.5 rounded ${reason.includes('買方') ? 'bg-rose-100 text-rose-600' :
-                                            reason.includes('金額') ? 'bg-amber-100 text-amber-600' :
-                                                reason.includes('ERP') ? 'bg-purple-100 text-purple-600' :
-                                                    reason.includes('賣方') ? 'bg-orange-100 text-orange-600' :
-                                                        'bg-gray-100 text-gray-600'
-                                            }`}>
-                                            {reason}
+                                <div className="flex flex-wrap gap-0.5">
+                                    {row.diffDetails.filter(d => DIFF_KEYS.includes(d as DiffKey)).map(d => (
+                                        <span key={d} className={`text-[8px] font-black px-1 py-px rounded ${DIFF_COLORS[d as DiffKey] ?? 'bg-gray-100 text-gray-500'}`}>
+                                            {DIFF_LABELS[d as DiffKey] ?? d}
                                         </span>
                                     ))}
                                 </div>
-
-                                <div className="flex items-center justify-between">
-                                    {item.entry.data[item.invoiceIndex]?.document_type ? (
-                                        <span className={`text-[9px] font-bold px-1 py-px rounded whitespace-nowrap ${item.entry.data[item.invoiceIndex].document_type === '統一發票' ? 'bg-blue-50 text-blue-600' :
-                                            item.entry.data[item.invoiceIndex].document_type === 'Invoice' ? 'bg-purple-50 text-purple-600' :
-                                                item.entry.data[item.invoiceIndex].document_type === '進口報關' ? 'bg-teal-50 text-teal-600' :
-                                                    'bg-gray-50 text-gray-500'
-                                            }`}>
-                                            {item.entry.data[item.invoiceIndex].document_type}
-                                        </span>
-                                    ) : <span></span>}
-                                    <div className="text-[9px] text-gray-400 flex items-center gap-1">
-                                        <Lucide.FileText className="w-2.5 h-2.5" />
-                                        {item.invoiceIndex + 1}/{item.entry.data.length}
-                                    </div>
-                                </div>
                             </div>
                         ))}
+
+                        {filteredRows.length === 0 && (
+                            <div className="text-center py-8 text-xs text-gray-400">此分類無異常</div>
+                        )}
                     </div>
                 </div>
 
-                {/* Split View */}
-                <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
-                    {/* Re-use InvoicePreview */}
-                    {/* Be careful with `currentIndex` which is for the LIST of files in InvoicePreview. 
-                     Here we just want to show ONE file.
-                     So we pass a list of 1 file, or adjust InvoicePreview to accept single file.
-                     InvoicePreview takes `entries` and `currentIndex`. We can pass errorList mapped to entries?
-                     No, InvoicePreview's file switcher allows switching files.
-                     Here the Sidebar controls the file.
-                     So we pass entries=[currentEntry] and currentIndex=0. 
-                     And ignore onSwitchFile.
-                 */}
-                    <div className="flex-1 shrink-0 h-full flex flex-col relative min-w-[400px]">
-                        <InvoicePreview
-                            currentEntry={currentEntry}
-                            entries={[currentEntry]} // Hide switcher effectively or show just one
-                            currentIndex={0}
-                            onSwitchFile={() => { }}
+                {/* Main split view */}
+                {selectedRow && currentEntry && currentInvoiceData ? (
+                    <div className="flex-1 flex overflow-x-auto overflow-y-hidden">
+                        <div className="flex-1 shrink-0 h-full flex flex-col relative min-w-[400px]">
+                            <InvoicePreview
+                                currentEntry={currentEntry}
+                                entries={[currentEntry]}
+                                currentIndex={0}
+                                onSwitchFile={() => {}}
+                            />
+                        </div>
+                        <ErrorReviewFormWrapper
+                            key={`${currentEntry.id}-${invoiceIndex}`}
+                            initialData={currentInvoiceData}
+                            invoiceIndex={invoiceIndex}
+                            totalInvoices={currentEntry.data.length}
+                            entryId={currentEntry.id}
+                            erpRecord={selectedRow.erp}
+                            onUpdate={(newData) => onUpdateInvoice(currentEntry.id, newData)}
+                            onNext={() => {
+                                if (selectedIndex < filteredRows.length - 1) setSelectedIndex(s => s + 1);
+                                else alert('已是最後一筆');
+                            }}
                         />
                     </div>
-
-                    {/* Re-use InvoiceForm */}
-                    {/* Wrapper to handle state */}
-                    <ErrorReviewFormWrapper
-                        key={`${currentEntry.id}-${selectedItem.invoiceIndex}`} // Re-mount on switch
-                        initialData={currentInvoiceData}
-                        invoiceIndex={selectedItem.invoiceIndex}
-                        totalInvoices={currentEntry.data.length}
-                        entryId={currentEntry.id}
-                        erpRecord={selectedItem.erp}
-                        onUpdate={(newData) => onUpdateInvoice(currentEntry.id, newData)}
-                        onNext={() => {
-                            if (selectedIndex < filteredErrorList.length - 1) setSelectedIndex(s => s + 1);
-                            else alert('已是最後一筆');
-                        }}
-                    />
-                </div>
+                ) : (
+                    <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+                        選擇左側項目以檢視
+                    </div>
+                )}
             </div>
         </div>
     );
@@ -328,22 +222,18 @@ const ErrorReviewPage: React.FC<Props> = ({ project, auditList, onBack, onUpdate
 
 // Local wrapper to bridge InvoiceForm state
 const ErrorReviewFormWrapper: React.FC<{
-    initialData: InvoiceData,
-    invoiceIndex: number,
-    totalInvoices: number,
-    entryId: string,
-    erpRecord?: any,
-    onUpdate: (data: InvoiceData) => void,
-    onNext: () => void
+    initialData: InvoiceData;
+    invoiceIndex: number;
+    totalInvoices: number;
+    entryId: string;
+    erpRecord?: any;
+    onUpdate: (data: InvoiceData) => void;
+    onNext: () => void;
 }> = ({ initialData, invoiceIndex, totalInvoices, entryId, erpRecord, onUpdate, onNext }) => {
     const [formData, setFormData] = React.useState(initialData);
 
-    // Auto-save on unmount or explicit save? 
-    // User expects "Save".
     const handleSave = () => {
-        onUpdate(formData); // This updates the global state in App.tsx
-        // Visual feedback?
-        // Maybe move to next automatically?
+        onUpdate(formData);
         onNext();
     };
 
@@ -354,11 +244,11 @@ const ErrorReviewFormWrapper: React.FC<{
             currentInvoiceIndex={invoiceIndex}
             totalInvoices={totalInvoices}
             erpRecord={erpRecord}
-            onInvoiceSwitch={() => { }} // Disable switching invoices within form, use sidebar
+            onInvoiceSwitch={() => {}}
             onSave={handleSave}
             showCloseButton={false}
         />
     );
-}
+};
 
 export default ErrorReviewPage;
