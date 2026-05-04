@@ -433,6 +433,17 @@ If image is a generic unbillable document (Packing List, delivery note), set 'er
         }
       }
 
+      // Rule 2b: Validate Taiwan tax ID checksum (mod-5 rule, post-2023 amendment)
+      if (item.seller_tax_id && /^\d{8}$/.test(item.seller_tax_id)) {
+        const { validateTaiwanTaxId } = await import('../src/lib/taxIdValidator');
+        if (!validateTaiwanTaxId(item.seller_tax_id)) {
+          if (!item.verification.flagged_fields.includes('seller_tax_id')) {
+            item.verification.flagged_fields.push('seller_tax_id');
+          }
+          logs.push(`Rule 2b: Seller Tax ID ${item.seller_tax_id} failed checksum (mod-5 rule)`);
+        }
+      }
+
       // Rule 3: Validating & Auto-Correcting Amounts (amount_total = amount_sales + amount_tax)
       const sales = item.amount_sales || 0;
       const tax = item.amount_tax || 0;
