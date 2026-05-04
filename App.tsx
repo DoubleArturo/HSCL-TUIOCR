@@ -218,8 +218,8 @@ const App: React.FC = () => {
         localStorage.setItem('project_list', JSON.stringify(newList));
     };
 
-    const startEditingProject = (p: ProjectMeta, e: React.MouseEvent) => {
-        e.stopPropagation();
+    const startEditingProject = (p: ProjectMeta, e?: React.MouseEvent) => {
+        e?.stopPropagation();
         setEditingProjectId(p.id);
         setEditName(p.name);
         setEditYear(p.year || new Date().getFullYear());
@@ -879,8 +879,16 @@ const App: React.FC = () => {
                             </button>
                             <div className="h-6 w-px bg-gray-200"></div>
                             <div>
-                                <div className="flex items-center gap-2">
-                                    <h1 className="text-base font-black text-gray-900 tracking-tight">{project?.name}</h1>
+                                <div className="flex items-center gap-2 cursor-pointer group" onDoubleClick={() => project && startEditingProject({
+                                    id: project.id,
+                                    name: project.name,
+                                    updatedAt: project.updatedAt,
+                                    invoiceCount: project.invoices.length,
+                                    erpCount: project.erpData.length,
+                                    year: project.year,
+                                    month: project.month
+                                })} title="雙擊可編輯">
+                                    <h1 className="text-base font-black text-gray-900 tracking-tight group-hover:text-indigo-600 transition-colors">{project?.name}</h1>
                                     {project?.year && project?.month && (
                                         <span className="bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg text-xs font-mono font-bold">
                                             {project.year}-{String(project.month).padStart(2, '0')}
