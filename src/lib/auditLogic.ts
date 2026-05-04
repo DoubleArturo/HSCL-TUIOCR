@@ -78,10 +78,15 @@ export function computeAuditRows(
 
       // --- Diffs ---
 
-      // 1. Amount
-      const erpTotal = erp.amount_total;
-      const ocrTotalSum = matchedOCRInvoices.reduce((s, inv) => s + (inv.amount_total || 0), 0);
-      if (Math.abs(ocrTotalSum - erpTotal) > 1) diffDetails.push('amount');
+      // 1. Amount — compare ERP total directly against all valid OCR invoices in the file,
+      // regardless of whether invoice numbers matched. This avoids false 'amount' diffs
+      // when inv_no mismatch causes matchedOCRInvoices to be empty (sum would be 0).
+      const validOCRForAmount = allOCRInvoices.filter(isInvoiceDoc);
+      if (validOCRForAmount.length > 0) {
+        const erpTotal = erp.amount_total;
+        const ocrTotalSum = validOCRForAmount.reduce((s, inv) => s + (inv.amount_total || 0), 0);
+        if (Math.abs(ocrTotalSum - erpTotal) > 1) diffDetails.push('amount');
+      }
 
       // 2. Invoice date
       const erpDate = normalizeDate(erp.invoice_date);
