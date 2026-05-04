@@ -202,7 +202,21 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     console.log("SystemInstruction (Type):", typeof SYSTEM_INSTRUCTION);
 
 
-    let promptText = "Extract all invoice data. IMPORTANT: If the document contains MULTIPLE physical invoices (e.g. top and bottom halves, multiple stapled pages, or multiple invoice numbers), return EACH invoice as a SEPARATE object in the JSON array - do NOT merge them. If the image is a generic unbillable document like a 'Packing List', set 'error_code' to 'NOT_INVOICE' and DO NOT extract invoice numbers or amounts (output 0). If image is blurry, set 'error_code' accordingly.";
+    let promptText = `Extract all invoice data from this document.
+
+**MULTI-INVOICE PAGES — CRITICAL ISOLATION RULE**:
+If the document image contains MULTIPLE physical invoices (e.g. two invoices side-by-side, top/bottom halves, or multiple stapled pages scanned together):
+1. FIRST, visually identify and mentally draw a boundary around EACH separate invoice form.
+2. For EACH invoice boundary, extract data ONLY from within that boundary. Never mix fields across boundaries.
+3. Return one separate JSON object per invoice, in left-to-right or top-to-bottom order.
+4. Each object MUST have its own unique invoice_number, invoice_date, and amounts. If two objects end up with the same invoice_number — you made an error: re-examine the image carefully.
+5. Common layouts: two invoices side by side (左右兩張), same paper vertically split, or physically stacked/stapled scans.
+
+**DATA INTEGRITY CHECK**: Before returning, verify:
+- Do all returned invoice_numbers look distinct from each other? If not, re-read that invoice area.
+- Does each object's amount_total match what is printed in ITS OWN 總計 cell?
+
+If image is a generic unbillable document (Packing List, delivery note), set 'error_code' to 'NOT_INVOICE' and output 0 for all amounts. If image is blurry, set 'error_code' accordingly.`;
 
     if (expectedERP && (expectedERP.amount_total !== undefined || expectedERP.amount_sales !== undefined || expectedERP.amount_tax !== undefined)) {
       promptText += `\n\n[CROSS-CHECK REQUIRED]: The ERP system expects the following totals for this document:\n`;
@@ -492,6 +506,14 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
         );
         if (hasBetterMatch) {
           console.log(`[Dedup] Dropping ghost result with null invoice_number, total=${item.amount_total}`);
+          return false;
+        }
+      }
+      // Exact duplicate: same invoice_number already seen at an earlier index — drop the repeat
+      if (item.invoice_number) {
+        const firstOccurrence = results.findIndex(other => other.invoice_number === item.invoice_number);
+        if (firstOccurrence !== index) {
+          console.log(`[Dedup] Dropping duplicate invoice_number=${item.invoice_number} at index ${index} (first seen at ${firstOccurrence})`);
           return false;
         }
       }
