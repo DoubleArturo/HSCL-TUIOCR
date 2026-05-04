@@ -100,6 +100,8 @@ export interface ProjectMeta {
   updatedAt: string;
   invoiceCount: number;
   erpCount: number;
+  year?: number;
+  month?: number;
 }
 
 export interface Project {
@@ -109,6 +111,8 @@ export interface Project {
   erpData: ERPRecord[];
   createdAt: string;
   updatedAt: string;
+  year?: number;
+  month?: number;
 }
 export interface ProcessingState {
   current: number;

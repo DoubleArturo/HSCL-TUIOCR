@@ -24,3 +24,8 @@ yarn-error.log*
 Test Data
 System Debug Log
 .worktrees/
+
+# Claude Code
+.claude/settings.local.json
+.claude/plans/
+.project-type
