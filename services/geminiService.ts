@@ -28,7 +28,14 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 - **Invoice Number**: For standard GUI, must be 2 English Letters + 8 Digits. Remove spaces. For others, extract the exact number.
 - **Amounts**: You MUST output the exact numbers printed on the image. 
 - **CRITICAL ZERO RULE FOR AMOUNTS**: If a specific monetary value (e.g. Sales Amount, Tax Amount) is NOT visibly printed on the document, YOU MUST OUTPUT 0. Under NO CIRCUMSTANCES should you hallucinate numbers or invent taxes if they are not explicitly printed. DO NOT calculate numbers that are not there to "balance" an equation.
-- **Date**: Normalize to YYYY-MM-DD. Handle ROC years.
+- **Date**: Normalize to YYYY-MM-DD.
+  ROC Year Rules (CRITICAL — handwritten invoices often use ROC year):
+  - Handwritten "115年3月2日" → 115+1911=2026 → "2026-03-02"
+  - Slash/dot format "115/3/2" or "115.3.2" → "2026-03-02"
+  - Pure numeric YYYMMDD "1150302" → "2026-03-02"
+  - If year is 3 digits (e.g. 113, 114, 115) → it is ROC year → add 1911
+  - If year is 4 digits starting with 20xx → it is AD year → use as-is
+  - NEVER output a year below 1911 or above 2100
 - **Tax IDs**: Must be 8 digits for Taiwan companies.
 
 ### 3. Tax Code Classification (稅別 tax_code) — 對照 Tiptop 系統
@@ -58,6 +65,7 @@ Based on the document type and content, assign ONE of the following codes:
   → If the invoice amounts are written in ink/pen (hand-filled) → T300 三聯手寫, regardless of how the delivery note looks.
   → If "收銀機統一發票" is printed on the invoice form AND all amounts are machine-printed → T302 三聯收銀.
   → When in doubt between T300 and T302: if ANY amount cell appears hand-filled → choose T300.
+  → **ABSOLUTE RULE for T302**: The exact text "收銀機統一發票" MUST be physically printed in the invoice form's header or title area. If this text is absent, it is T300 — full stop. The presence of machine-printed delivery notes (出貨單) elsewhere in the same PDF does NOT make an invoice T302. Each invoice page must be classified solely from its own form content, independent of all other pages in the PDF.
 
   **STEP 4 — EXTRACT amounts from the invoice grid ONLY**:
   → 銷售額 (sales) comes from the 銷售額合計 / 未稅金額 cell of the 統一發票.
@@ -410,7 +418,22 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
 
     // --- Deduplicate ghost results & filter mixed NOT_INVOICE types ---
     // Check if the file contains at least one valid invoice (not a packing list or empty document)
-    const isGenericDocument = (type: string) => type === '非發票' || type.includes('Packing List') || type.includes('Delivery');
+    const isGenericDocument = (type: string) => {
+      const t = (type || '').toLowerCase();
+      return (
+        type === '非發票' ||
+        t.includes('packing list') ||
+        t.includes('delivery') ||
+        t.includes('出貨單') ||
+        t.includes('送貨單') ||
+        t.includes('訂單出貨') ||
+        t.includes('出貨憑證') ||
+        t.includes('出貨通知') ||
+        t.includes('銷貨單') ||
+        t.includes('收料單') ||
+        t.includes('驗收單')
+      );
+    };
     const hasValidInvoice = results.some(r => !isGenericDocument(r.document_type || '') && r.invoice_number);
 
     results = results.filter((item, index) => {
