@@ -37,6 +37,11 @@ Examine the document to determine its exact type. DO NOT just output generic cla
   - If year is 4 digits starting with 20xx → it is AD year → use as-is
   - NEVER output a year below 1911 or above 2100
 - **Tax IDs**: Must be 8 digits for Taiwan companies.
+- **Seller Tax ID (賣方統編) — CRITICAL for 三聯收銀 T302**:
+  On a 三聯收銀 invoice, the "買受人" field contains the BUYER's tax ID — this is NOT the seller.
+  The seller's tax ID is found in: (a) the seller's company header block at the top of the invoice form, OR (b) the accompanying 訂單出貨憑證 under "統一編號/郵編" next to the seller's company name.
+  NEVER output the tax ID next to "買受人:" as seller_tax_id.
+  If seller tax ID cannot be found on the invoice, output null — the system will look it up from the database.
 
 ### 3. Tax Code Classification (稅別 tax_code) — 對照 Tiptop 系統
 Based on the document type and content, assign ONE of the following codes:
@@ -265,8 +270,17 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       console.warn('Failed to load seller_db.json', e);
     }
 
-    // Merge Static DB with Dynamic DB (Dynamic takes precedence)
-    const MERGED_SELLERS = { ...STATIC_SELLERS, ...knownSellers };
+    // Load Supabase dynamic seller DB (highest priority)
+    let SUPABASE_SELLERS: Record<string, string> = {};
+    try {
+      const { fetchAllSellers } = await import('./supabaseService');
+      SUPABASE_SELLERS = await fetchAllSellers();
+    } catch (e) {
+      console.warn('Failed to load Supabase seller DB', e);
+    }
+
+    // Merge: Static < ERP Excel < Supabase (Supabase wins)
+    const MERGED_SELLERS = { ...STATIC_SELLERS, ...knownSellers, ...SUPABASE_SELLERS };
 
     // Post-processing to enforce business rules
     const processedResults = await Promise.all(results.map(async (item) => {
@@ -349,11 +363,29 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
       // If we extracted a name but ID is unclear, try to find in DB
       if (item.seller_name && (!item.seller_tax_id || item.seller_tax_id.includes('?'))) {
         for (const [name, id] of Object.entries(MERGED_SELLERS)) {
-          if (item.seller_name.includes(name)) {
+          if (item.seller_name.includes(name) || name.includes(item.seller_name)) {
             item.seller_tax_id = id;
             logs.push(`Enriched: Found Seller Tax ID from DB (${name} -> ${id})`);
             break;
           }
+        }
+      }
+
+      // B. Auto-save new seller to Supabase (never save our own buyer tax ID)
+      const BUYER_TAX_IDS = ['16547744'];
+      if (
+        item.seller_name &&
+        item.seller_tax_id &&
+        /^\d{8}$/.test(item.seller_tax_id) &&
+        !item.seller_tax_id.includes('?') &&
+        !BUYER_TAX_IDS.includes(item.seller_tax_id)
+      ) {
+        try {
+          const { upsertSeller } = await import('./supabaseService');
+          await upsertSeller(item.seller_name, item.seller_tax_id, 'ocr');
+          logs.push(`SellerDB: Upserted ${item.seller_name} (${item.seller_tax_id}) to Supabase`);
+        } catch (e) {
+          console.warn('[SellerDB] Auto-save failed', e);
         }
       }
 
