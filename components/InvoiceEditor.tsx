@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { InvoiceEntry, InvoiceData } from '../types';
 import * as Lucide from 'lucide-react';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -7,6 +7,7 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import InvoicePreview from './InvoicePreview';
 import InvoiceForm from './InvoiceForm';
+import { upsertSeller } from '../services/supabaseService';
 
 // Configure PDF worker
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -64,6 +65,9 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
   // TODO: If a single file has multiple invoices (e.g. multi-page), we might need another level of navigation.
   // For now, consistent with App.tsx, we rely on the first parsed invoice of the file.
   const [formData, setFormData] = useState<InvoiceData | null>(null);
+  const originalSellerRef = useRef<{ name: string; taxId: string } | null>(null);
+  const [showSellerSyncDialog, setShowSellerSyncDialog] = useState(false);
+  const pendingSaveRef = useRef<InvoiceData | null>(null);
 
   const [zoom, setZoom] = useState(1);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -91,9 +95,15 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
       const safeIndex = Math.min(currentInvoiceIndex, currentEntry.data.length - 1);
       if (safeIndex !== currentInvoiceIndex) setCurrentInvoiceIndex(safeIndex);
 
-      setFormData(currentEntry.data[safeIndex]);
+      const inv = currentEntry.data[safeIndex];
+      setFormData(inv);
+      originalSellerRef.current = {
+        name: inv.seller_name || '',
+        taxId: inv.seller_tax_id || '',
+      };
     } else {
       setFormData(null);
+      originalSellerRef.current = null;
     }
 
     // Only reset view when changing FILES (currentIndex), not invoices within file
@@ -136,9 +146,38 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
   };
 
   const handleSave = () => {
-    if (formData && currentEntry) {
+    if (!formData || !currentEntry) return;
+    const orig = originalSellerRef.current;
+    const sellerChanged =
+      orig &&
+      (formData.seller_name !== orig.name || formData.seller_tax_id !== orig.taxId) &&
+      (formData.seller_name || formData.seller_tax_id);
+    if (sellerChanged) {
+      pendingSaveRef.current = formData;
+      setShowSellerSyncDialog(true);
+    } else {
       onSave(currentEntry.id, formData);
     }
+  };
+
+  const handleSaveOnly = () => {
+    if (pendingSaveRef.current && currentEntry) {
+      onSave(currentEntry.id, pendingSaveRef.current);
+    }
+    setShowSellerSyncDialog(false);
+    pendingSaveRef.current = null;
+  };
+
+  const handleSaveAndSync = async () => {
+    const data = pendingSaveRef.current;
+    if (data && currentEntry) {
+      onSave(currentEntry.id, data);
+      if (data.seller_name && data.seller_tax_id && !data.seller_tax_id.includes('?')) {
+        await upsertSeller(data.seller_name, data.seller_tax_id, 'manual');
+      }
+    }
+    setShowSellerSyncDialog(false);
+    pendingSaveRef.current = null;
   };
 
   const getFieldSeverity = (field: string) => {
@@ -233,6 +272,55 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
           showCloseButton={true}
         />
       </div>
+
+      {showSellerSyncDialog && pendingSaveRef.current && (
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-sm mx-4">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="p-2 bg-amber-100 rounded-xl shrink-0">
+                <Lucide.Database className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="font-black text-gray-900 text-sm">廠商資料有異動</h3>
+                <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                  你修改了賣方名稱或統編，是否同步更新廠商資料庫？
+                </p>
+              </div>
+            </div>
+            <div className="bg-gray-50 rounded-xl p-3 mb-4 space-y-1.5 text-xs font-mono">
+              {originalSellerRef.current?.name !== pendingSaveRef.current.seller_name && (
+                <div className="flex gap-2 items-center">
+                  <span className="text-gray-400 line-through">{originalSellerRef.current?.name || '—'}</span>
+                  <Lucide.ArrowRight className="w-3 h-3 text-gray-400 shrink-0" />
+                  <span className="text-gray-900 font-bold">{pendingSaveRef.current.seller_name || '—'}</span>
+                </div>
+              )}
+              {originalSellerRef.current?.taxId !== pendingSaveRef.current.seller_tax_id && (
+                <div className="flex gap-2 items-center">
+                  <span className="text-gray-400 line-through">{originalSellerRef.current?.taxId || '—'}</span>
+                  <Lucide.ArrowRight className="w-3 h-3 text-gray-400 shrink-0" />
+                  <span className="text-gray-900 font-bold">{pendingSaveRef.current.seller_tax_id || '—'}</span>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={handleSaveOnly}
+                className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors"
+              >
+                只更新這張
+              </button>
+              <button
+                onClick={handleSaveAndSync}
+                className="flex-1 px-3 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5"
+              >
+                <Lucide.Database className="w-3.5 h-3.5" />
+                同步更新資料庫
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
