@@ -29,3 +29,4 @@ System Debug Log
 .claude/settings.local.json
 .claude/plans/
 .project-type
+.vercel
