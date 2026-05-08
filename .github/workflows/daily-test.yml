@@ -1,0 +1,36 @@
+name: Daily Test & Regression Check
+
+on:
+  schedule:
+    # 每天 UTC 01:00 = 台灣時間 09:00
+    - cron: '0 1 * * *'
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Vitest
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --reporter=verbose
+
+      - name: Summarize results
+        if: always()
+        run: |
+          echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "Ran on: $(date -u '+%Y-%m-%d %H:%M UTC') (台灣時間 +8h)" >> $GITHUB_STEP_SUMMARY
+          echo "Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
