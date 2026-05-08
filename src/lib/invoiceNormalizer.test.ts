@@ -58,7 +58,11 @@ describe('deduplicateResults', () => {
 describe('normalizeDate', () => {
   it('passes through ISO date', () => expect(normalizeDate('2026-01-06')).toBe('2026-01-06'));
   it('converts YYYY/MM/DD', () => expect(normalizeDate('2026/01/06')).toBe('2026-01-06'));
+  it('converts YYYY.MM.DD', () => expect(normalizeDate('2026.01.06')).toBe('2026-01-06'));
   it('converts ROC YYY/MM/DD', () => expect(normalizeDate('115/01/06')).toBe('2026-01-06'));
+  it('converts ROC YYY-MM-DD (dash)', () => expect(normalizeDate('115-01-06')).toBe('2026-01-06'));
+  it('converts ROC YYY.MM.DD (dot)', () => expect(normalizeDate('115.01.06')).toBe('2026-01-06'));
   it('returns empty string for empty input', () => expect(normalizeDate('')).toBe(''));
   it('pads single-digit month/day', () => expect(normalizeDate('2026/1/6')).toBe('2026-01-06'));
+  it('pads single-digit ROC month/day', () => expect(normalizeDate('115/3/5')).toBe('2026-03-05'));
 });

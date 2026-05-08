@@ -71,4 +71,38 @@ describe('parseERPRows', () => {
     const result = parseERPRows([HEADER_ROW, row] as any);
     expect(result[0].invoice_date).toBe('2026-01-06');
   });
+
+  it('parses invoice numbers with Chinese comma / semicolon / slash separators', () => {
+    const row = [...DATA_ROW];
+    row[10] = 'AB12345678、CD87654321/EF11111111';
+    const result = parseERPRows([HEADER_ROW, row] as any);
+    expect(result[0].invoice_numbers).toEqual(['AB12345678', 'CD87654321', 'EF11111111']);
+  });
+});
+
+describe('parseERPRows - Tiptop long column names', () => {
+  // Tiptop ERP exports use verbose column headers with parenthetical suffixes
+  const TIPTOP_HEADER = [
+    '傳票編號', '發票日期', '稅別', '', '', '', '', '', '廠商名稱', '', '發票號碼', '統一編號', '',
+    '未稅金額(本幣)(查詢 1 與 fin_apb)',
+    '稅額(本幣)(查詢 1 與 fin_apb)',
+    '含稅金額(本幣)(查詢 1 與 fin_apb)',
+  ];
+  const TIPTOP_ROW = ['G61-Q40010', '2026/03/25', 'T300', '', '', '', '', '', '某廠商', '', 'XV37730672', '97332997', '', '93298', '4665', '97963'];
+
+  it('detects Tiptop header with long parenthetical column names', () => {
+    const map = detectHeaderMap([TIPTOP_HEADER as any]);
+    expect(map).not.toBeNull();
+    expect(map!.amount_sales).toBe(13);
+    expect(map!.amount_tax).toBe(14);
+    expect(map!.amount_total).toBe(15);
+  });
+
+  it('parses amounts correctly from Tiptop column names', () => {
+    const result = parseERPRows([TIPTOP_HEADER, TIPTOP_ROW] as any);
+    expect(result[0].amount_sales).toBe(93298);
+    expect(result[0].amount_tax).toBe(4665);
+    expect(result[0].amount_total).toBe(97963);
+    expect(result[0].seller_tax_id).toBe('97332997');
+  });
 });
