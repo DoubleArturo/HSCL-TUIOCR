@@ -8,6 +8,13 @@ function normInvNo(s: string | null | undefined): string {
   return (s || '').replace(/[\s-]/g, '').toUpperCase();
 }
 
+// Strip non-digits; if OCR adds a leading zero to an 8-digit TW tax ID, remove it.
+function normTaxId(s: string | null | undefined): string {
+  const digits = (s || '').replace(/\D/g, '');
+  if (digits.length === 9 && digits.startsWith('0')) return digits.slice(1);
+  return digits;
+}
+
 function isInvoiceDoc(inv: InvoiceData): boolean {
   return inv.document_type !== '非發票' && inv.error_code !== 'NOT_INVOICE';
 }
@@ -78,13 +85,15 @@ export function computeAuditRows(
 
       // --- Diffs ---
 
-      // 1. Amount — compare ERP total directly against all valid OCR invoices in the file,
-      // regardless of whether invoice numbers matched. This avoids false 'amount' diffs
-      // when inv_no mismatch causes matchedOCRInvoices to be empty (sum would be 0).
-      const validOCRForAmount = allOCRInvoices.filter(isInvoiceDoc);
-      if (validOCRForAmount.length > 0) {
+      // 1. Amount — prefer matched invoices so a multi-invoice file (side-by-side scan)
+      // doesn't sum ALL amounts against a single ERP record. Fall back to all-valid-in-file
+      // only when no number-based match exists (OCR couldn't read the invoice number).
+      const invoicesForAmount = matchedOCRInvoices.length > 0
+        ? matchedOCRInvoices
+        : allOCRInvoices.filter(isInvoiceDoc);
+      if (invoicesForAmount.length > 0) {
         const erpTotal = erp.amount_total;
-        const ocrTotalSum = validOCRForAmount.reduce((s, inv) => s + (inv.amount_total || 0), 0);
+        const ocrTotalSum = invoicesForAmount.reduce((s, inv) => s + (inv.amount_total || 0), 0);
         if (Math.abs(ocrTotalSum - erpTotal) > 1) diffDetails.push('amount');
       }
 
@@ -107,15 +116,16 @@ export function computeAuditRows(
         diffDetails.push('inv_no');
       }
 
-      // 5. Seller tax ID
-      const erpTaxId = erp.seller_tax_id || '';
+      // 5. Seller tax ID — normalize both sides before comparing (handles OCR leading-zero bug)
+      const erpTaxId = normTaxId(erp.seller_tax_id);
       matchedOCRInvoices.forEach(inv => {
         if (shouldSkipFromAudit(inv)) return;
-        const ocrTaxId = inv.seller_tax_id || '';
+        const rawOcrTaxId = inv.seller_tax_id || '';
+        const ocrTaxId = normTaxId(rawOcrTaxId);
         if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId && !diffDetails.includes('tax_id')) {
           diffDetails.push('tax_id');
         }
-        if (ocrTaxId.includes('?') && !diffDetails.includes('tax_id_unclear')) {
+        if (rawOcrTaxId.includes('?') && !diffDetails.includes('tax_id_unclear')) {
           diffDetails.push('tax_id_unclear');
         }
       });

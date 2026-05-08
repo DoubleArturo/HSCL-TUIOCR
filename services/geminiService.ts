@@ -425,6 +425,16 @@ If image is a generic unbillable document (Packing List, delivery note), set 'er
         if (original !== item.invoice_number) logs.push(`Rule 1: Cleaned Invoice Number (${original} -> ${item.invoice_number})`);
       }
 
+      // Rule 2a: Sanitize seller_tax_id — OCR sometimes prepends a leading 0 to an 8-digit TW ID
+      if (item.seller_tax_id) {
+        const taxDigits = item.seller_tax_id.replace(/\D/g, '');
+        if (taxDigits.length === 9 && taxDigits.startsWith('0')) {
+          const fixed = taxDigits.slice(1);
+          logs.push(`Rule 2a: Stripped leading zero from seller_tax_id (${item.seller_tax_id} → ${fixed})`);
+          item.seller_tax_id = fixed;
+        }
+      }
+
       // Rule 2: Check for '?' in Seller Tax ID and flag it
       if (item.seller_tax_id && item.seller_tax_id.includes('?')) {
         if (!item.verification.flagged_fields.includes('seller_tax_id')) {

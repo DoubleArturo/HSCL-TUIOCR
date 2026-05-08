@@ -136,3 +136,39 @@ describe('computeAuditRows - exclusions', () => {
     expect(rows.find(r => r.id === 'G11-Q10001')?.auditStatus).toBe('MATCH');
   });
 });
+
+describe('computeAuditRows - regression: side-by-side multi-invoice file', () => {
+  // G61-Q40010 bug: one file contains two invoices scanned side-by-side.
+  // ERP record for XV37730672 (97963) should NOT get 金額不符 just because
+  // the same file also contains XV37730673 (106680).
+  it('does not sum all-file invoices when the target invoice is already matched', () => {
+    const ocr1 = makeOCR({ invoice_number: 'XV37730672', amount_sales: 93298, amount_tax: 4665, amount_total: 97963 });
+    const ocr2 = makeOCR({ invoice_number: 'XV37730673', amount_sales: 101600, amount_tax: 5080, amount_total: 106680 });
+    // Both invoices in the same file entry
+    const sharedFile: import('../../types').InvoiceEntry = {
+      id: 'G61-Q40010',
+      file: new File([], 'G61-Q40010.jpg') as any,
+      previewUrl: '',
+      status: 'SUCCESS',
+      data: [ocr1, ocr2],
+    };
+    const erp1 = makeERP({ voucher_id: 'G61-Q40010', invoice_numbers: ['XV37730672'], amount_sales: 93298, amount_tax: 4665, amount_total: 97963 });
+    const rows = computeAuditRows([erp1], [sharedFile]);
+    const row = rows.find(r => r.id === 'G61-Q40010');
+    expect(row?.diffDetails).not.toContain('amount');
+    expect(row?.auditStatus).toBe('MATCH');
+  });
+});
+
+describe('computeAuditRows - regression: OCR leading-zero on tax ID', () => {
+  // XV37730675 bug: OCR returns "097332997" (9 digits) for a valid 8-digit tax ID "97332997".
+  // normTaxId should strip the leading zero so comparison passes.
+  it('does not flag tax_id mismatch when OCR adds a leading zero', () => {
+    const rows = computeAuditRows(
+      [makeERP({ seller_tax_id: '97332997' })],
+      [makeEntry('G11-Q10001', makeOCR({ seller_tax_id: '097332997' }))],
+    );
+    expect(rows[0].diffDetails).not.toContain('tax_id');
+    expect(rows[0].auditStatus).toBe('MATCH');
+  });
+});
