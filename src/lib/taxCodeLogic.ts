@@ -7,7 +7,7 @@ const VOUCHER_TO_TAX: Record<string, TaxCode> = {
   '三聯電子': 'T301',
   '三聯收銀': 'T302',
   '二聯收銀': 'T500',
-  '車票': 'T500',
+  '交通票券': 'T500',
   'Invoice': 'TXXX',
   '收據': 'TXXX',
   '非發票': 'TXXX',

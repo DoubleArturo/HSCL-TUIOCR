@@ -9,6 +9,8 @@ interface Props {
     currentInvoiceIndex: number;
     totalInvoices: number;
     erpRecord?: any;
+    auditStatus?: string;
+    diffDetails?: string[];
     onInvoiceSwitch: (index: number) => void;
     onSave: () => void;
     onClose?: () => void;
@@ -20,7 +22,7 @@ interface Props {
 const InvoiceForm: React.FC<Props> = ({
     formData, setFormData,
     currentInvoiceIndex, totalInvoices, onInvoiceSwitch,
-    erpRecord,
+    erpRecord, auditStatus, diffDetails = [],
     onSave, onClose, showCloseButton = true, onDelete, onReOCR
 }) => {
 
@@ -76,48 +78,22 @@ const InvoiceForm: React.FC<Props> = ({
 
     const FieldHeader = ({ label, field, score }: { label: string, field: string, score: number }) => {
         const isFlagged = formData.verification?.flagged_fields?.includes(field);
-        let erpMismatchValue = null;
-        if (erpRecord) {
-            if (field === 'seller_tax_id' && erpRecord.seller_tax_id && formData.seller_tax_id != erpRecord.seller_tax_id) erpMismatchValue = erpRecord.seller_tax_id;
-            if (field === 'amount_total' && erpRecord.amount_total && formData.amount_total != erpRecord.amount_total) erpMismatchValue = erpRecord.amount_total;
-        }
-
         const severity = getFieldSeverity(field);
-        const alertColor = (isFlagged || erpMismatchValue || severity === 'critical') ? 'text-rose-600' : (severity === 'warning' ? 'text-amber-500' : 'text-slate-500');
+        const alertColor = (isFlagged && severity === 'critical') ? 'text-rose-600' : (severity === 'warning' ? 'text-amber-500' : 'text-slate-500');
 
-        // Confidence UI Logic
-        // 1. Critical Errors (ERP Mismatch, Flagged): Keep Prominent
-        // 2. High Confidence (>=100): Subtle Green Dot
-        // 3. Low Confidence (<100): Subtle Amber Text (No heavy background)
         return (
             <label className="flex items-center justify-between text-xs font-black text-gray-500 mb-1.5 uppercase tracking-wider group/label">
                 <span className="flex items-center gap-1.5">
                     {label}
-                    {(isFlagged || erpMismatchValue) && (<Lucide.AlertTriangle className={`w-3.5 h-3.5 ${alertColor}`} />)}
+                    {isFlagged && (<Lucide.AlertTriangle className={`w-3.5 h-3.5 ${alertColor}`} />)}
                 </span>
-                <div className="flex items-center gap-2">
-                    {erpMismatchValue && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-600 border border-rose-200" title={`ERP Value: ${erpMismatchValue}`}>
-                            ERP不符
-                        </span>
-                    )}
-
-                    {/* Simplified Confidence Indicator */}
-                    {isFlagged || erpMismatchValue ? (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-600 text-white">
-                            異常
+                <div className="flex items-center gap-2" title={`AI Confidence: ${score}%`}>
+                    {score < 90 ? (
+                        <span className={`text-[10px] font-bold ${score < 80 ? 'text-amber-600' : 'text-slate-400'}`}>
+                            {score}%
                         </span>
                     ) : (
-                        <div className="flex items-center gap-1.5" title={`AI Confidence: ${score}%`}>
-                            {score < 90 ? (
-                                <span className={`text-[10px] font-bold ${score < 80 ? 'text-amber-600' : 'text-slate-400'}`}>
-                                    {score}%
-                                </span>
-                            ) : (
-                                // High Confidence (>=90%): Minimalist Dot
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 opacity-50 group-hover/label:opacity-100 transition-opacity"></div>
-                            )}
-                        </div>
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 opacity-50 group-hover/label:opacity-100 transition-opacity"></div>
                     )}
                 </div>
             </label>
@@ -126,14 +102,27 @@ const InvoiceForm: React.FC<Props> = ({
 
     // Quick Fix Handler
 
-    const errorSummary = [];
+    // Build error summary — auditStatus from list is primary source of truth
+    const DIFF_LABEL_MAP: Record<string, string> = {
+        amount: '金額不符', date: '日期不符', inv_no: '發票號碼不符',
+        tax_code: '稅別不符', tax_id: '統編不符', tax_id_unclear: '統編模糊',
+        count_mismatch: '數量不符', no_match_found: '找不到對應',
+    };
+    const errorSummary: string[] = [];
+    if (auditStatus === 'MISMATCH') {
+        diffDetails.forEach(d => { if (DIFF_LABEL_MAP[d]) errorSummary.push(DIFF_LABEL_MAP[d]); });
+    } else if (auditStatus === 'MISSING_FILE') {
+        errorSummary.push('缺少憑證');
+    } else if (auditStatus === 'EXTRA_FILE') {
+        errorSummary.push('無對應ERP記錄');
+    }
+    // Supplement with OCR-level flags not captured by auditStatus
     if (!formData.manually_verified) {
         if (!formData.verification.logic_is_valid) errorSummary.push('金額勾稽錯誤');
-        if (formData.verification.flagged_fields?.includes('seller_tax_id')) errorSummary.push('賣方統編異常');
-        if (formData.verification.flagged_fields?.includes('invoice_number')) errorSummary.push('發票號碼格式異常');
+        if (formData.verification.flagged_fields?.includes('buyer_tax_id')) errorSummary.push('買方統編異常');
     }
 
-    const isSuccess = errorSummary.length === 0;
+    const isSuccess = errorSummary.length === 0 || formData.manually_verified;
 
 
     // Manual Verification Handler

@@ -17,7 +17,7 @@ function isInvoiceDoc(inv: InvoiceData): boolean {
 function isCountableForAmount(inv: InvoiceData): boolean {
   if (!isInvoiceDoc(inv)) return false;
   if (inv.tax_code === 'TXXX') return false;
-  if (inv.tax_code === 'T500' && inv.voucher_type === '車票') return false;
+  if (inv.tax_code === 'T500' && inv.voucher_type === '交通票券') return false;
   return true;
 }
 

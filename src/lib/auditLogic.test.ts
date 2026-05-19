@@ -156,10 +156,10 @@ describe('computeAuditRows - Fix 1: isCountableForAmount', () => {
     expect(rows[0].diffDetails).not.toContain('amount');
   });
 
-  it('T500 transit ticket (voucher_type=車票) does not trigger amount diff', () => {
+  it('T500 transit ticket (voucher_type=交通票券) does not trigger amount diff', () => {
     const ticket = makeOCR({
       tax_code: 'T500',
-      voucher_type: '車票',
+      voucher_type: '交通票券',
       document_type: '高鐵票',
       invoice_number: null,
       amount_total: 540,
@@ -197,7 +197,7 @@ describe('computeAuditRows - Fix 3: T500 ERP row skips amount diff', () => {
   it('MATCH when ERP is T500 and amounts match', () => {
     const ticket = makeOCR({
       tax_code: 'T500',
-      voucher_type: '車票',
+      voucher_type: '交通票券',
       invoice_number: 'THSR001',
       amount_sales: 514,
       amount_tax: 26,
@@ -213,7 +213,7 @@ describe('computeAuditRows - Fix 3: T500 ERP row skips amount diff', () => {
   it('no amount diff when ERP is T500 even if OCR total differs', () => {
     const ticket = makeOCR({
       tax_code: 'T500',
-      voucher_type: '車票',
+      voucher_type: '交通票券',
       invoice_number: 'THSR002',
       amount_total: 540,
     });

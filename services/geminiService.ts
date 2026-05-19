@@ -21,7 +21,7 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 1. **"統一發票"** - If it is a standard Taiwan GUI (e.g. 2 Letters + 8 Digits, has "電子發票證明聯", QR codes, "載具"). ALWAYS output exactly "統一發票".
 2. **"進口報單" or "海關進口快遞貨物稅費繳納證明"** - Output exactly what the document states.
 3. **Specific Document Names** - Provide the exact name: "Invoice", "Commercial Invoice", "Receipt", "Debit Note", etc.
-4. **"非發票" (Delivery Notes / Packing Lists / Order Documents)** - If it is a "銷貨單", "出貨單", "送貨單", "訂單出貨憑證", "出貨通知單", "Packing List", "出貨憑證", "估價單", "驗收單", "收料單" (documents without finalized tax/sales amounts or are just delivery proofs), set error_code="NOT_INVOICE". These are support documents that ACCOMPANY invoices — do NOT extract them as invoices.
+4. **"非發票" (Delivery Notes / Packing Lists / Order Documents)** - If it is a "銷貨單", "出貨單", "送貨單", "訂單出貨憑證", "出貨通知單", "Packing List", "出貨憑證", "估價單", "驗收單", "收料單" (documents without finalized tax/sales amounts or are just delivery proofs), set error_code="NOT_INVOICE". These are support documents that ACCOMPANY invoices — do NOT extract them as invoices. **Exception: In a multi-page PDF, if a later page contains a 統一發票, extract that invoice and ignore the delivery note page. Only mark NOT_INVOICE when the entire document has no 統一發票 at all.**
 
 ### 1. Field Extraction Rules
 - **Currency**: Extract the currency code (e.g., TWD, USD, EUR, JPY, CNY). If no currency is explicitly listed or context clearly implies NT$, output "TWD".
@@ -48,14 +48,18 @@ Examine the document to determine its exact type. DO NOT just output generic cla
 Based on the document type and content, assign ONE of the following codes:
 - **"T300"**: 三聯式手開統一發票（手寫填入，發票格式21）→ voucher_type="三聯手寫"
 - **"T301"**: 三聯式電子發票（印有「電子發票證明聯」字樣，發票格式25）→ voucher_type="三聯電子"
-- **"T302"**: 三聯式收銀機統一發票（印有「收銀機統一發票」字樣）→ voucher_type="三聯收銀"
+- **"T302"**: 三聯式收銀機統一發票（印有「收銀機統一發票」字樣，**三聯**，有「扣抵聯」或「買受人存根聯」字樣，格式25，A4橫式或接近A4尺寸）→ voucher_type="三聯收銀"
 - **"T400"**: 海關進口貨物稅費繳納憑單（customs import tax，發票格式28）
-- **"T500"**: 二聯式收銀機統一發票（印有「收銀機統一發票」字樣，長條形，發票格式22）OR 車票（台灣鐵路、Metro、高鐵、客運、捷運 ticket）
-- **"TXXX"**: All other: 收據（免用統一發票、計程車收據、停車場）、English Invoice（外國廠商）、旅行社代收轉付收据
+- **"T500"**: 二聯式收銀機統一發票（印有「收銀機統一發票」字樣，**二聯**，無「扣抵聯」文字，**長條型窄紙**（熱感應收據紙，類似超市收據），格式22，常見停車場、加油站、超市、便利商店）OR 車票（台灣鐵路、Metro、高鐵、客運、捷運 ticket）
+- **"TXXX"**: All other: 收據（免用統一發票、計程車收據）、English Invoice（外國廠商）、旅行社代收轉付收据
 
 **KEY DISTINCTION T301 vs T302**:
 - T301 (三聯電子): MUST have "電子發票證明聯" text. Has "格式25" or "格式 25" printed. Needs e-invoice platform upload.
 - T302 (三聯收銀): Has "收銀機統一發票" text, shows "(三聯式" or "扣抵聯", NO QR codes, NO "電子發票" text.
+
+**KEY DISTINCTION T302 vs T500** ← THIS IS CRITICAL, BOTH HAVE "收銀機統一發票":
+- T302 (三聯收銀, 格式25): **THREE-PART** invoice. Has "扣抵聯" OR "買受人存根聯" OR "收執聯" printed. Paper size is approximately A4 or half-A4 (wider format). The invoice has a grid with 買受人 / 品名 / 數量 / 單價 columns. Commonly issued by B2B suppliers.
+- T500 (二聯收銀, 格式22): **TWO-PART** invoice. **NO "扣抵聯" text anywhere**. Paper is a **narrow thermal receipt strip** (長條型熱感紙，寬約7-8cm). Commonly issued by: parking lots (停車場), gas stations (加油站), supermarkets (超市), convenience stores (便利商店). If the document looks like a long narrow receipt strip → it is T500, NOT T302.
 
 **KEY DISTINCTION T300 vs T302**:
 - T300 (手寫): The monetary amounts and buyer info are written by hand/pen/ink. No "收銀機" text. Format 21. The invoice form has blank lines to fill in — amounts are hand-filled.
@@ -81,7 +85,7 @@ Based on the document type and content, assign ONE of the following codes:
 **CRITICAL SKIP RULES** - set error_code to "NOT_INVOICE" for these:
 1. English "Invoice" documents (foreign supplier invoices without TW invoice number)
 2. Transportation tickets (高鐵、火車、客運、捷遊 ticket, etc.) - set tax_code="T500" then skip
-3. Pure 訂單出貨憑證 / 送貨單 / 出貨通知單 pages with NO attached 統一發票 — these are delivery support docs, not invoices
+3. Pure 訂單出貨憑證 / 送貨單 / 出貨通知單 pages with NO attached 統一發票 — these are delivery support docs, not invoices. **IMPORTANT: For multi-page PDFs, you MUST scan ALL pages before deciding. A page 1 delivery note (出貨憑證) followed by a page 2 統一發票 is a valid invoice document — extract the 統一發票 from page 2, ignore the delivery note. Only set NOT_INVOICE if the ENTIRE document contains zero 統一發票 forms.**
 
 ### 4. Voucher Type Classification (voucher_type)
 Must be consistent with tax_code:
@@ -90,7 +94,7 @@ Must be consistent with tax_code:
 - **"三聯電子"**: T301 — 電子發票證明聯，格式25
 - **"二聯收銀"**: T500 — 收銀機二聯發票，格式22
 - **"收據"**: TXXX — 各類收據（計程車、停車場、免用統一發票）
-- **"車票"**: T500 — 高鐵/火車/客運/捷運票券
+- **"交通票券"**: T500 — 高鐵/火車/客運/捷運票券（台灣高鐵電子車票證明、台鐵票、客運票等）
 - **"Invoice"**: TXXX — 英文Invoice（外國廠商）
 - **"其他"**: 其他（T400海關、進口報單等）
 
@@ -110,7 +114,7 @@ const invoiceObjectSchema = {
     },
     voucher_type: {
       type: "STRING",
-      enum: ["三聯手寫", "三聯收銀", "三聯電子", "二聯收銀", "收據", "車票", "Invoice", "其他"],
+      enum: ["三聯手寫", "三聯收銀", "三聯電子", "二聯收銀", "收據", "交通票券", "Invoice", "其他"],
       description: "Fine-grained voucher format type per section 4 of instructions"
     },
     tax_code: {
@@ -218,7 +222,9 @@ If the document image contains MULTIPLE physical invoices (e.g. two invoices sid
 - Do all returned invoice_numbers look distinct from each other? If not, re-read that invoice area.
 - Does each object's amount_total match what is printed in ITS OWN 總計 cell?
 
-If image is a generic unbillable document (Packing List, delivery note), set 'error_code' to 'NOT_INVOICE' and output 0 for all amounts. If image is blurry, set 'error_code' accordingly.`;
+**MULTI-PAGE PDF RULE**: This document may contain multiple pages. Even if page 1 is a delivery note (訂單出貨憑證 / 出貨通知單), you MUST check every subsequent page for a 統一發票. Extract the invoice from whichever page it appears on. Only output NOT_INVOICE if NO page in the entire document contains a 統一發票 form.
+
+If the ENTIRE document (all pages) contains only generic unbillable documents (Packing List, delivery note with no invoice anywhere), set 'error_code' to 'NOT_INVOICE' and output 0 for all amounts. If image is blurry, set 'error_code' accordingly.`;
 
     if (expectedERP && (expectedERP.amount_total !== undefined || expectedERP.amount_sales !== undefined || expectedERP.amount_tax !== undefined)) {
       promptText += `\n\n[CROSS-CHECK REQUIRED]: The ERP system expects the following totals for this document:\n`;
@@ -321,7 +327,7 @@ If image is a generic unbillable document (Packing List, delivery note), set 'er
         else if (vt === '三聯電子') item.tax_code = 'T301';
         else if (vt === '三聯收銀') item.tax_code = 'T302';
         else if (vt === '二聯收銀') item.tax_code = 'T500';
-        else if (vt === '車票') item.tax_code = 'T500';
+        else if (vt === '交通票券') item.tax_code = 'T500';
         else if (vt === 'Invoice' || vt === '收據') item.tax_code = 'TXXX';
         // Fallback to document_type heuristics
         else if (dt.includes('海關') || dt.includes('customs') || dt.includes('進口報單') || dt.includes('稅費繳納')) {
@@ -349,11 +355,10 @@ If image is a generic unbillable document (Packing List, delivery note), set 'er
         item.voucher_type = (tcMap[item.tax_code || ''] || '其他') as any;
       }
 
-      // --- SKIP LOGIC for Invoice (foreign) and transit tickets ---
-      const isSkippable = (
-        item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice' ||
+      // --- TRANSIT TICKET DETECTION — normalize voucher_type and clear seller_tax_id ---
+      const isTransitTicket = (
+        item.voucher_type === '交通票券' ||
         item.tax_code === 'T500' && (
-          (item.document_type || '').toLowerCase().includes('車票') ||
           (item.document_type || '').toLowerCase().includes('車票') ||
           (item.document_type || '').toLowerCase().includes('高鐵') ||
           (item.document_type || '').toLowerCase().includes('火車') ||
@@ -363,15 +368,19 @@ If image is a generic unbillable document (Packing List, delivery note), set 'er
           (item.document_type || '').toLowerCase().includes('ticket')
         )
       );
-      if (isSkippable && item.error_code === ('SUCCESS' as any)) {
-        // Only mark NOT_INVOICE if it's being auto-skipped (not a real TW invoice)
-        // Keep error_code SUCCESS for transit T500 that user needs to see; just flag tax_code
-        if (item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice') {
-          item.error_code = 'NOT_INVOICE' as any;
-          logs.push(`AUTO-SKIP: Foreign Invoice detected. Document is skipped (tax_code=TXXX, NOT_INVOICE).`);
-        } else {
-          logs.push(`INFO: Transit ticket detected (tax_code=T500). No detailed parsing needed.`);
-        }
+      if (isTransitTicket) {
+        item.voucher_type = '交通票券';
+        item.tax_code = 'T500';
+        // Transit tickets (高鐵電子車票等) only show the BUYER's tax ID (統一編號 = 清河 16547744).
+        // There is no seller tax ID field — clear it to avoid misidentification.
+        item.seller_tax_id = null;
+        logs.push(`Transit ticket detected: forced voucher_type=交通票券, cleared seller_tax_id`);
+      }
+
+      // --- SKIP LOGIC for foreign Invoice ---
+      if ((item.document_type === 'Invoice' || item.document_type === 'Commercial Invoice') && item.error_code === ('SUCCESS' as any)) {
+        item.error_code = 'NOT_INVOICE' as any;
+        logs.push(`AUTO-SKIP: Foreign Invoice detected. Document is skipped (tax_code=TXXX, NOT_INVOICE).`);
       }
 
 

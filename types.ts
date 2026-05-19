@@ -32,7 +32,7 @@ export enum VerificationCode {
   UNKNOWN = "UNKNOWN"
 }
 
-export type VoucherType = '三聯手寫' | '三聯收銀' | '三聯電子' | '二聯收銀' | '收據' | '車票' | 'Invoice' | '其他';
+export type VoucherType = '三聯手寫' | '三聯收銀' | '三聯電子' | '二聯收銀' | '收據' | '交通票券' | 'Invoice' | '其他';
 
 export interface InvoiceData {
   document_type: string; // E.g., '統一發票', 'Invoice', '進口報關', 'Receipt', 'Packing List', etc.

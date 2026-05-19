@@ -1319,7 +1319,7 @@ const App: React.FC = () => {
                                                         {isMismatch && !isInvoiceRow && row.diffDetails.includes('no_match_found') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">找不到對應</span>}
                                                     </div>
                                                 </td>
-                                                <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => row.file && row.file.previewUrl && setSelectedKey(row.key)}>
+                                                <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => setSelectedKey(row.key)}>
                                                     {row.file ? (
                                                         <>
                                                             {row.file.status === 'PROCESSING' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : (hasOcrButNoFile ? <FileSearch className="w-3.5 h-3.5 text-amber-400" /> : <FileText className="w-3.5 h-3.5 text-indigo-300" />)}
@@ -1400,7 +1400,7 @@ const App: React.FC = () => {
         .btn-blue { @apply bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100; }
         .btn-indigo { @apply bg-indigo-600 text-white hover:bg-indigo-700 border border-transparent; }
       `}</style>
-            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} onSave={handleSave} onDelete={handleDeleteOCR} onReOCR={handleReOCR} onClose={() => setSelectedKey(null)} />}
+            {selectedKey && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} auditStatus={selectedRow?.auditStatus} diffDetails={selectedRow?.diffDetails} onSave={handleSave} onDelete={handleDeleteOCR} onReOCR={handleReOCR} onClose={() => setSelectedKey(null)} />}
 
             {editingProjectId && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">

@@ -19,14 +19,16 @@ interface Props {
   entries: InvoiceEntry[];
   initialEntryId?: string;
   initialInvoiceIndex?: number;
-  erpRecord?: any; // or ERPRecord type if imported, but use 'any' to avoid import clash if lazy
+  erpRecord?: any;
+  auditStatus?: string;
+  diffDetails?: string[];
   onSave: (id: string, updatedData: InvoiceData) => void;
   onClose: () => void;
   onDelete?: (id: string) => void;
   onReOCR?: (id: string) => void;
 }
 
-const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoiceIndex, erpRecord, onSave, onClose, onDelete, onReOCR }) => {
+const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoiceIndex, erpRecord, auditStatus, diffDetails, onSave, onClose, onDelete, onReOCR }) => {
   // Current active file index - default to matching ID or 0
   const [currentIndex, setCurrentIndex] = useState(() => {
     if (initialEntryId) {
@@ -130,6 +132,27 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
     // How to detect "user switched file"? 
     // Maybe just check if the new file is NOT the initial file, OR if we have already consumed the initial load.
   }, [currentIndex]);
+
+  // No file uploaded for this ERP row (MISSING_FILE)
+  if (entries.length === 0) {
+    return (
+      <div className={`fixed inset-0 z-50 bg-gray-900/60 backdrop-blur-md flex justify-end transition-opacity duration-300 ${isVisible ? 'opacity-100' : 'opacity-0'}`}>
+        <div className={`bg-white w-full max-w-md h-full shadow-2xl flex flex-col transition-transform duration-500 ease-in-out ${isVisible ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className="p-4 border-b flex justify-between items-center">
+            <h2 className="text-lg font-black text-gray-900">稽核編輯器</h2>
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-full text-gray-400"><Lucide.X className="w-5 h-5" /></button>
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
+            <div className="p-4 bg-rose-50 rounded-2xl">
+              <Lucide.FileX className="w-10 h-10 text-rose-400" />
+            </div>
+            <p className="font-black text-gray-800">尚未上傳憑證</p>
+            <p className="text-sm text-gray-500 leading-relaxed">此 ERP 記錄沒有對應的掃描憑證。請上傳對應的憑證檔案後再進行稽核。</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!formData || !currentEntry) return null;
 
@@ -266,6 +289,8 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
           currentInvoiceIndex={currentInvoiceIndex}
           totalInvoices={currentEntry.data.length}
           erpRecord={erpRecord}
+          auditStatus={auditStatus}
+          diffDetails={diffDetails}
           onInvoiceSwitch={setCurrentInvoiceIndex}
           onSave={handleSave}
           onDelete={onDelete ? () => { onDelete(currentEntry.id); onClose(); } : undefined}
