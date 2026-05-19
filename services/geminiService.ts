@@ -42,6 +42,7 @@ Examine the document to determine its exact type. DO NOT just output generic cla
   The seller's tax ID is found in: (a) the seller's company header block at the top of the invoice form, OR (b) the accompanying 訂單出貨憑證 under "統一編號/郵編" next to the seller's company name.
   NEVER output the tax ID next to "買受人:" as seller_tax_id.
   If seller tax ID cannot be found on the invoice, output null — the system will look it up from the database.
+- **Buyer Tax ID (buyer_tax_id)**: On 三聯手寫 (T300) invoices, the buyer's tax ID is at the lower-left section labeled '買受人統一編號' or '買受人'. Extract exactly 8 digits. Use '?' for any digit obscured by grid lines, stamps, or unclear handwriting (e.g. '165?7744'). Output null if the field is entirely absent or unreadable.
 
 ### 3. Tax Code Classification (稅別 tax_code) — 對照 Tiptop 系統
 Based on the document type and content, assign ONE of the following codes:
@@ -122,6 +123,7 @@ const invoiceObjectSchema = {
     invoice_date: { type: "STRING" },
     seller_name: { type: "STRING" },
     seller_tax_id: { type: "STRING", description: "The Tax ID of the Seller (賣方). Use '?' for unclear digits." },
+    buyer_tax_id: { type: "STRING", description: "The Tax ID of the Buyer (買受人統一編號). On 三聯手寫 invoices, found at lower-left '買受人統一編號' field. 8 digits. Use '?' for digits obscured by grid lines or stamps. Output null if not visible." },
     currency: { type: "STRING", description: "Currency of the amounts (e.g., TWD, USD, EUR). Default to TWD if none found." },
     amount_sales: { type: "INTEGER" },
     amount_tax: { type: "INTEGER" },
@@ -441,6 +443,26 @@ If image is a generic unbillable document (Packing List, delivery note), set 'er
             item.verification.flagged_fields.push('seller_tax_id');
           }
           logs.push(`Rule 2b: Seller Tax ID ${item.seller_tax_id} failed checksum (mod-5 rule)`);
+        }
+      }
+
+      // Rule 2c: Validate buyer_tax_id
+      const EXPECTED_BUYER_TAX_IDS = ['16547744'];
+      if (item.buyer_tax_id) {
+        if (item.buyer_tax_id.includes('?')) {
+          if (!item.verification.flagged_fields.includes('buyer_tax_id')) {
+            item.verification.flagged_fields.push('buyer_tax_id');
+            logs.push(`Rule 2c: Flagged unclear Buyer Tax ID (${item.buyer_tax_id})`);
+          }
+        } else if (/^\d{8}$/.test(item.buyer_tax_id)) {
+          if (!EXPECTED_BUYER_TAX_IDS.includes(item.buyer_tax_id)) {
+            if (!item.verification.flagged_fields.includes('buyer_tax_id')) {
+              item.verification.flagged_fields.push('buyer_tax_id');
+              logs.push(`Rule 2c: Buyer Tax ID ${item.buyer_tax_id} does not match expected (${EXPECTED_BUYER_TAX_IDS.join(', ')})`);
+            }
+          } else {
+            logs.push(`Rule 2c: Buyer Tax ID validated OK (${item.buyer_tax_id})`);
+          }
         }
       }
 

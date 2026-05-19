@@ -23,9 +23,10 @@ interface Props {
   onSave: (id: string, updatedData: InvoiceData) => void;
   onClose: () => void;
   onDelete?: (id: string) => void;
+  onReOCR?: (id: string) => void;
 }
 
-const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoiceIndex, erpRecord, onSave, onClose, onDelete }) => {
+const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoiceIndex, erpRecord, onSave, onClose, onDelete, onReOCR }) => {
   // Current active file index - default to matching ID or 0
   const [currentIndex, setCurrentIndex] = useState(() => {
     if (initialEntryId) {
@@ -268,6 +269,7 @@ const InvoiceEditor: React.FC<Props> = ({ entries, initialEntryId, initialInvoic
           onInvoiceSwitch={setCurrentInvoiceIndex}
           onSave={handleSave}
           onDelete={onDelete ? () => { onDelete(currentEntry.id); onClose(); } : undefined}
+          onReOCR={onReOCR ? () => onReOCR(currentEntry.id) : undefined}
           onClose={onClose}
           showCloseButton={true}
         />

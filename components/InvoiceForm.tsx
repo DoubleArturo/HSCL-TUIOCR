@@ -14,13 +14,14 @@ interface Props {
     onClose?: () => void;
     showCloseButton?: boolean;
     onDelete?: () => void;
+    onReOCR?: () => void;
 }
 
 const InvoiceForm: React.FC<Props> = ({
     formData, setFormData,
     currentInvoiceIndex, totalInvoices, onInvoiceSwitch,
     erpRecord,
-    onSave, onClose, showCloseButton = true, onDelete
+    onSave, onClose, showCloseButton = true, onDelete, onReOCR
 }) => {
 
     const handleChange = (field: keyof InvoiceData, value: any) => {
@@ -221,6 +222,13 @@ const InvoiceForm: React.FC<Props> = ({
                     >
                         <Lucide.CheckCheck className="w-3.5 h-3.5" /> 視覺確認無誤
                     </button>
+                    {onReOCR && (
+                        <button
+                            onClick={() => { if (window.confirm('確定要重新辨識？現有 OCR 結果將被覆蓋。')) onReOCR(); }}
+                            className="p-1.5 hover:bg-blue-50 rounded-full text-blue-400 hover:text-blue-600 transition-colors"
+                            title="重新辨識（不需重新上傳）"
+                        ><Lucide.RefreshCw className="w-4 h-4" /></button>
+                    )}
                     {onDelete && (
                         <button
                             onClick={() => { if (window.confirm('確定要刪除此 OCR 辨識資料？刪除後可重新上傳檔案再次比對。')) onDelete(); }}

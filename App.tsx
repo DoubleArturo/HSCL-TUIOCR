@@ -728,6 +728,70 @@ const App: React.FC = () => {
         setSelectedKey(null);
     };
 
+    const handleReOCR = async (id: string) => {
+        const entry = project?.invoices.find(inv => inv.id === id);
+        if (!entry?.file) {
+            alert('找不到原始檔案，請重新上傳');
+            return;
+        }
+
+        updateProjectInvoices(prev => prev.map(inv =>
+            inv.id === id ? { ...inv, status: 'PENDING' as const, data: [], error: undefined } : inv
+        ));
+        setSelectedKey(null);
+        setStatus(AppStatus.PROCESSING);
+        setProgress({ current: 0, total: 1, status: 'PROCESSING' });
+
+        try {
+            let processedFile = entry.file;
+            if (entry.file.type.startsWith('image/')) {
+                try {
+                    processedFile = await preprocessImageForOCR(entry.file, { sharpen: true, increaseContrast: true, grayscale: false });
+                } catch (err) {
+                    logger.warn('PREPROCESSING', `Re-OCR preprocess failed: ${id}`, err);
+                }
+            }
+
+            const base64 = await fileToBase64(processedFile);
+
+            const knownSellers: Record<string, string> = {};
+            project?.erpData?.forEach(erp => {
+                if (erp.seller_name && erp.seller_tax_id && /^\d{8}$/.test(erp.seller_tax_id.trim())) {
+                    knownSellers[erp.seller_name.trim()] = erp.seller_tax_id.trim();
+                }
+            });
+
+            let expectedERP = undefined;
+            const matchingErp = project?.erpData?.find(erp =>
+                id === erp.voucher_id || id.startsWith(erp.voucher_id + '-') || id.startsWith(erp.voucher_id + '_')
+            );
+            if (matchingErp) {
+                expectedERP = {
+                    amount_total: matchingErp.amount_total,
+                    amount_sales: matchingErp.amount_sales,
+                    amount_tax: matchingErp.amount_tax,
+                    invoice_numbers: matchingErp.invoice_numbers,
+                };
+            }
+
+            const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellers, expectedERP);
+            updateProjectInvoices(prev => prev.map(inv =>
+                inv.id === id
+                    ? { ...inv, status: results.length > 0 ? 'SUCCESS' as const : 'ERROR' as const, data: results, error: results.length > 0 ? undefined : '無法辨識發票內容' }
+                    : inv
+            ));
+        } catch (err: any) {
+            const msg = err?.message?.includes('429') ? 'API 額度已滿，請稍後再試' : (err?.message || '辨識失敗');
+            updateProjectInvoices(prev => prev.map(inv =>
+                inv.id === id ? { ...inv, status: 'ERROR' as const, error: msg } : inv
+            ));
+        } finally {
+            setStatus(AppStatus.IDLE);
+            setProgress({ current: 1, total: 1, status: 'COMPLETED' });
+            setTimeout(() => setProgress(p => ({ ...p, status: 'IDLE' })), 3000);
+        }
+    };
+
     const { auditList, metrics } = useAuditList(project, batchStats.totalDuration);
 
     const exportAuditReport = () => {
@@ -1336,7 +1400,7 @@ const App: React.FC = () => {
         .btn-blue { @apply bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100; }
         .btn-indigo { @apply bg-indigo-600 text-white hover:bg-indigo-700 border border-transparent; }
       `}</style>
-            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} onSave={handleSave} onDelete={handleDeleteOCR} onClose={() => setSelectedKey(null)} />}
+            {selectedFiles.length > 0 && <InvoiceEditor entries={selectedFiles} initialEntryId={selectedInitialFileId} initialInvoiceIndex={selectedInitialInvoiceIndex} erpRecord={selectedRow?.erp} onSave={handleSave} onDelete={handleDeleteOCR} onReOCR={handleReOCR} onClose={() => setSelectedKey(null)} />}
 
             {editingProjectId && (
                 <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">

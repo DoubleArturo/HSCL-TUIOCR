@@ -42,6 +42,7 @@ export interface InvoiceData {
   invoice_date: string | null;
   seller_name: string;
   seller_tax_id: string | null;
+  buyer_tax_id?: string | null;  // 買受人統一編號，8 位數字，含 '?' 代表模糊
   currency: string;
   amount_sales: number;
   amount_tax: number;
