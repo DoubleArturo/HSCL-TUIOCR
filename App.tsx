@@ -1282,8 +1282,8 @@ const App: React.FC = () => {
                                                         <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">{row.erp.tax_code}</span>
                                                     ) : '-'}
                                                 </td>
-                                                <td className={`px-1 py-3 text-right font-mono ${isMissing ? 'text-slate-300' : 'text-slate-500'}`}>{row.erp ? row.erp.amount_sales.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-right font-mono ${isMissing ? 'text-slate-300' : 'text-slate-500'}`}>{row.erp ? row.erp.amount_tax.toLocaleString() : '-'}</td>
+                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp ? row.erp.amount_sales.toLocaleString() : '-'}</td>
+                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp ? row.erp.amount_tax.toLocaleString() : '-'}</td>
                                                 <td className={`px-1 py-3 text-right font-mono font-bold ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-400' : 'text-slate-800')}`}>{row.erp ? row.erp.amount_total.toLocaleString() : '-'}</td>
                                                 <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${!isInvoiceRow && row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
                                                 <td className="px-1 py-3 text-center border-r border-gray-100 align-middle">
@@ -1351,10 +1351,10 @@ const App: React.FC = () => {
                                                             row.ocr.tax_code === 'T400' ? 'bg-teal-100 text-teal-700' :
                                                             row.ocr.tax_code === 'T500' ? 'bg-purple-100 text-purple-700' :
                                                             'bg-gray-100 text-gray-500'
-                                                        }`}>{row.ocr.tax_code}</span>
+                                                        } ${!isInvoiceRow && row.diffDetails.includes('tax_code') ? 'ring-2 ring-rose-500' : ''}`}>{row.ocr.tax_code}</span>
                                                     ) : '-'}
                                                 </td>
-                                                <td className="px-1 py-3 text-right font-mono text-indigo-400">
+                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-400'}`}>
                                                     {row.ocr ? (
                                                         <span className="flex items-center justify-end gap-1">
                                                             {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-400 font-sans tracking-wide">{row.ocr.currency}</span>}
@@ -1362,7 +1362,7 @@ const App: React.FC = () => {
                                                         </span>
                                                     ) : '-'}
                                                 </td>
-                                                <td className="px-1 py-3 text-right font-mono text-indigo-400">
+                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-400'}`}>
                                                     {row.ocr ? (
                                                         <span className="flex items-center justify-end gap-1">
                                                             {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-400 font-sans tracking-wide">{row.ocr.currency}</span>}

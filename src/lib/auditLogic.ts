@@ -155,6 +155,39 @@ export function computeAuditRows(
           }
         });
 
+        // Fix: when OCR didn't match any invoice, still compare ERP against fallback OCR
+        // so we surface ALL discrepancies (amount, tax_code, tax_id), not just inv_no
+        if (matchedOCRInvoices.length === 0 && allOCRInvoices.length > 0) {
+          const fallback = allOCRInvoices.find(
+            i => isCountableForAmount(i) && !claimedOCRInvNos.has(normInvNo(i.invoice_number) || '')
+          );
+          if (fallback) {
+            // Amount diff against fallback
+            const erpIsBusOrRailTicket = (erp.tax_code || '').toUpperCase() === 'T500';
+            if (!erpIsBusOrRailTicket && (fallback.amount_total || 0) > 0) {
+              if (Math.abs((fallback.amount_total || 0) - erp.amount_total) > 1) {
+                diffDetails.push('amount');
+              }
+            }
+            // Tax code diff against fallback
+            const erpTaxCode = (erp.tax_code || '').toUpperCase();
+            const fallbackTaxCode = (fallback.tax_code || '').toUpperCase();
+            if (erpTaxCode && fallbackTaxCode && erpTaxCode !== fallbackTaxCode) {
+              diffDetails.push('tax_code');
+            }
+            // Tax ID diff against fallback
+            if (!shouldSkipFromAudit(fallback)) {
+              const ocrTaxId = fallback.seller_tax_id || '';
+              if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId) {
+                diffDetails.push('tax_id');
+              }
+              if (ocrTaxId.includes('?')) {
+                diffDetails.push('tax_id_unclear');
+              }
+            }
+          }
+        }
+
         if (diffDetails.length > 0) auditStatus = 'MISMATCH';
       } else {
         auditStatus = 'MISMATCH';

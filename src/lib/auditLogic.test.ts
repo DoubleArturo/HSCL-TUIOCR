@@ -273,4 +273,90 @@ describe('computeAuditRows - Fix 2: duplicate voucher_id grouping', () => {
     // row2 cannot claim AB (already taken), no OCR matches CD → inv_no diff
     expect(row2?.diffDetails).toContain('inv_no');
   });
+
+  it('OCR 漏掉發票時，應報告所有不符合的差異（不只是 inv_no）', () => {
+    // ERP: XW17220651 (T302, 11926, seller_tax_id=83632740)
+    // OCR: ZH56112376 (T301, 1050, seller_tax_id=00840779) - completely different invoice
+    // Because invoice numbers don't match, matchedOCRInvoices = []
+    // Fallback comparison should detect: inv_no, amount, tax_code, tax_id diffs
+
+    const erpRecord = makeERP({
+      voucher_id: 'G12-Q50007',
+      invoice_numbers: ['XW17220651'],
+      tax_code: 'T302',
+      amount_total: 11926,
+      seller_tax_id: '83632740',
+    });
+
+    const fallbackOCR = makeOCR({
+      invoice_number: 'ZH56112376',
+      tax_code: 'T301',
+      amount_total: 1050,
+      seller_tax_id: '00840779',
+    });
+
+    const entry = makeEntry('G12-Q50007', fallbackOCR);
+
+    const rows = computeAuditRows([erpRecord], [entry]);
+    const auditRow = rows[0];
+
+    expect(auditRow.auditStatus).toBe('MISMATCH');
+    expect(auditRow.diffDetails).toContain('inv_no');
+    expect(auditRow.diffDetails).toContain('amount');
+    expect(auditRow.diffDetails).toContain('tax_code');
+    expect(auditRow.diffDetails).toContain('tax_id');
+  });
+
+  it('多筆 ERP 行同 voucher，一張 OCR 漏掉時，其他有 match 的行不受影響', () => {
+    // Voucher G12-Q50007 has 2 ERP rows:
+    // Row 1: XW17220651 (T302, 11926) - no OCR match, should use fallback
+    // Row 2: ZH56112376 (T301, 1050) - exact OCR match exists
+    // Ensure Row 1 gets all diffs, Row 2 gets MATCH
+
+    const erp1 = makeERP({
+      voucher_id: 'G12-Q50007',
+      invoice_numbers: ['XW17220651'],
+      tax_code: 'T302',
+      amount_total: 11926,
+      seller_tax_id: '83632740',
+    });
+
+    const erp2 = makeERP({
+      voucher_id: 'G12-Q50007',
+      invoice_numbers: ['ZH56112376'],
+      tax_code: 'T301',
+      amount_total: 1050,
+      seller_tax_id: '00840779',
+    });
+
+    const ocr1 = makeOCR({
+      invoice_number: 'ZH56112376',
+      tax_code: 'T301',
+      amount_total: 1050,
+      seller_tax_id: '00840779',
+    });
+
+    const ocr2 = makeOCR({
+      invoice_number: 'XW10376161',
+      tax_code: 'T302',
+      amount_total: 735,
+      seller_tax_id: '12345678',
+    });
+
+    const entry = makeEntry('G12-Q50007', ocr1);
+    entry.data.push(ocr2);
+
+    const rows = computeAuditRows([erp1, erp2], [entry]);
+    const row1 = rows.find(r => r.erp?.invoice_numbers?.includes('XW17220651'));
+    const row2 = rows.find(r => r.erp?.invoice_numbers?.includes('ZH56112376'));
+
+    // Row 1: no exact match, uses fallback (ocr1), has diffs
+    expect(row1?.auditStatus).toBe('MISMATCH');
+    expect(row1?.diffDetails).toContain('inv_no');
+    expect(row1?.diffDetails).toContain('amount');
+
+    // Row 2: exact match with ocr1, should be MATCH
+    expect(row2?.auditStatus).toBe('MATCH');
+    expect(row2?.diffDetails.length).toBe(0);
+  });
 });
