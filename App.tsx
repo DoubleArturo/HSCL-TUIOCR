@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Upload, Loader2, AlertCircle, CheckCircle2, Edit3, Trash2, FileSearch, Key, PlusSquare, FileDown, Clock, FileText, FileSpreadsheet, ArrowLeftRight, AlertTriangle, ArrowRight, UploadCloud, FolderOpen, ChevronRight, LogOut, Calendar, Database, Search, Plus, X } from 'lucide-react';
 import { analyzeInvoice } from './services/geminiService';
-import { preprocessImageForOCR } from './utils/imagePreprocessing';
+import { enhanceImageForOCR } from './src/lib/imageEnhancement';
 import { InvoiceData, AppStatus, InvoiceEntry, Project, ERPRecord, ProjectMeta, ProcessingState, AuditRow } from './types';
 import InvoiceEditor from './components/InvoiceEditor';
 import ErrorReviewPage from './components/ErrorReviewPage';
@@ -456,6 +456,15 @@ const App: React.FC = () => {
                 }
             }
 
+            // Enhance image for OCR (contrast/brightness normalization for faint/blurry documents)
+            try {
+                logger.info('IMAGE', `Enhancing for OCR: ${processedFile.name}`);
+                processedFile = await enhanceImageForOCR(processedFile);
+            } catch (err) {
+                logger.warn('IMAGE', `Image enhancement failed (using original): ${processedFile.name}`, err);
+                // Continue with original file if enhancement fails
+            }
+
             const filename = processedFile.name;
             let id = filename.substring(0, filename.lastIndexOf('.')) || filename;
 
@@ -746,9 +755,9 @@ const App: React.FC = () => {
             let processedFile = entry.file;
             if (entry.file.type.startsWith('image/')) {
                 try {
-                    processedFile = await preprocessImageForOCR(entry.file, { sharpen: true, increaseContrast: true, grayscale: false });
+                    processedFile = await enhanceImageForOCR(entry.file);
                 } catch (err) {
-                    logger.warn('PREPROCESSING', `Re-OCR preprocess failed: ${id}`, err);
+                    logger.warn('PREPROCESSING', `Re-OCR image enhancement failed: ${id}`, err);
                 }
             }
 
