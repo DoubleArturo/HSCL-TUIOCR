@@ -68,15 +68,25 @@ export async function enhanceImageForOCR(file: File): Promise<File> {
               gray = ((gray - minVal) / contrastRange) * 255;
             }
 
-            // Step 3: Apply slight brightness boost for very dark images
-            if (maxVal < 200) {
+            // Step 3: Apply aggressive brightness boost for very low-contrast images
+            if (contrastRange < 100) {
+              // Very faint ink — apply multiplicative boost
+              gray = Math.min(255, gray * 1.3);
+            } else if (maxVal < 200) {
               gray = Math.min(255, gray * 1.15);
             }
 
-            // Step 4: Sharpen by boosting mid-tones (sigmoid-like curve)
-            // This makes text boundaries crisper without oversaturation
+            // Step 4: Gamma correction + curve sharpening for text clarity
+            // For very low-contrast, apply stronger gamma to separate text from background
             const normalized = gray / 255;
-            const enhanced = Math.pow(normalized, 0.9) * 255;
+            let enhanced: number;
+            if (contrastRange < 100) {
+              // Very faint: aggressive gamma correction (0.75 power)
+              enhanced = Math.pow(normalized, 0.75) * 255;
+            } else {
+              // Normal: lighter correction (0.9 power)
+              enhanced = Math.pow(normalized, 0.9) * 255;
+            }
 
             data[i] = enhanced;
             data[i + 1] = enhanced;
