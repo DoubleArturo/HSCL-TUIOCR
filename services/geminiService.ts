@@ -204,7 +204,15 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
       systemPrompt += '\n\n' + unknownPrompt;
     }
 
-    console.log("SystemInstruction (Type):", typeof systemPrompt);
+    // ===== LOG: Prompt Composition =====
+    console.log("[GEMINI] ===== PROMPT COMPOSITION =====");
+    console.log("[GEMINI] promptText length:", promptText.length);
+    console.log("[GEMINI] Has EMBEDDED_INVOICE rule?", promptText.includes("EMBEDDED INVOICE IMAGES"));
+    console.log("[GEMINI] SystemPrompt segments:");
+    console.log("[GEMINI]   - PROMPT_BASE length:", PROMPT_BASE.length);
+    const typeSegment = systemPrompt.includes(PROMPT_BASE) ? systemPrompt.substring(PROMPT_BASE.length) : '';
+    console.log("[GEMINI]   - Type-specific segment length:", typeSegment.length);
+    console.log("[GEMINI] Total SystemInstruction length:", systemPrompt.length);
 
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: effectiveModel, // Use the real model name (stripped of hybrid suffix)
@@ -226,6 +234,22 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
       console.warn("AI returned empty response text.");
       return [];
     };
+
+    // ===== LOG: Raw Gemini Response =====
+    console.log("[GEMINI] ===== RAW RESPONSE =====");
+    try {
+      const parsedRaw = JSON.parse(text);
+      console.log("[GEMINI] Response is array?", Array.isArray(parsedRaw));
+      console.log("[GEMINI] Response item count:", Array.isArray(parsedRaw) ? parsedRaw.length : 1);
+      if (Array.isArray(parsedRaw)) {
+        console.log("[GEMINI] Invoice numbers extracted:", parsedRaw.map((item: any) => item.invoice_number || '(blank)').join(", "));
+        console.log("[GEMINI] Tax codes extracted:", parsedRaw.map((item: any) => item.tax_code || 'N/A').join(", "));
+      } else {
+        console.log("[GEMINI] Single object - invoice_number:", parsedRaw.invoice_number || '(blank)', "tax_code:", parsedRaw.tax_code || 'N/A');
+      }
+    } catch (e) {
+      console.error("[GEMINI] Failed to parse response as JSON:", e);
+    }
 
     const usage = response.usageMetadata;
     const inputPrice = 0.075 / 1000000; // $0.075 per 1M input tokens
@@ -628,6 +652,17 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
         console.log(`[Validation Guard] Skipping Pro escalation because no valid invoice data was found initially.`);
       }
     }
+
+    // ===== LOG: Final Results Summary =====
+    console.log("[GEMINI] ===== FINAL RESULTS =====");
+    console.log("[GEMINI] Total invoices returned:", results.length);
+    console.log("[GEMINI] Invoice numbers:", results.map(r => r.invoice_number || '(blank)').join(", "));
+    console.log("[GEMINI] Tax codes:", results.map(r => r.tax_code || 'N/A').join(", "));
+    console.log("[GEMINI] Amounts (total):", results.map(r => r.amount_total || 0).join(", "));
+    if (expectedERP) {
+      console.log("[GEMINI] ERP expects:", expectedERP.invoice_numbers?.join(", ") || 'N/A', "| tax_code:", expectedERP.tax_code, "| amount:", expectedERP.amount_total);
+    }
+    console.log("[GEMINI] ===== END GEMINI LOG =====");
 
     return results;
 
