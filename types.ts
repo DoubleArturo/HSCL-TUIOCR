@@ -32,10 +32,11 @@ export enum VerificationCode {
   UNKNOWN = "UNKNOWN"
 }
 
-export type VoucherType = '三聯手寫' | '三聯收銀' | '三聯電子' | '二聯收銀' | '收據' | '交通票券' | 'Invoice' | '其他';
+export type VoucherType = string;
 
 export interface InvoiceData {
   document_type: string; // E.g., '統一發票', 'Invoice', '進口報關', 'Receipt', 'Packing List', etc.
+  /** 常見值: '三聯手寫'|'三聯收銀'|'三聯電子'|'二聯收銀'|'收據'|'交通票券'|'Invoice'|'其他'，未知類型會填入原始文字 */
   voucher_type?: VoucherType; // Fine-grained classification displayed in status column
   tax_code: string | null; // 稅別 e.g. 'T300', 'T301', 'T302', 'T400', 'T500', 'TXXX'
   invoice_number: string | null;
@@ -71,6 +72,7 @@ export interface ExpectedERP {
   amount_sales?: number;
   amount_tax?: number;
   invoice_numbers?: string[];
+  tax_code?: string;
 }
 
 export interface ERPRecord {

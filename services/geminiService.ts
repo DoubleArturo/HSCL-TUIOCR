@@ -1,5 +1,14 @@
-import { GoogleGenAI, GenerateContentResponse, Part } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { InvoiceData, ExpectedERP } from "../types";
+import { PROMPT_BASE } from './prompts/base';
+import { PROMPT_T300 } from './prompts/T300';
+import { PROMPT_T301 } from './prompts/T301';
+import { PROMPT_T302 } from './prompts/T302';
+import { PROMPT_T500 } from './prompts/T500';
+import { PROMPT_TXXX } from './prompts/TXXX';
+import { buildUnknownTypePrompt } from './prompts/unknown';
+import { validateInvoice, autoCorrectAmounts } from './validationPipeline';
+import { recordUnknownType, getRegistry, isKnownType } from './documentRegistry';
 
 // Define process for Vite environment to avoid TS errors
 declare const process: {
@@ -10,98 +19,17 @@ declare const process: {
   }
 };
 
-const SYSTEM_INSTRUCTION = `
-You are an expert OCR system for Taiwanese Unified Invoices (GUI) and related business documents.
-Your goal is to extract structured data from document images with 100% precision.
-
-### 0. Document Type Classification (CRITICAL - First Step)
-Examine the document to determine its exact type. DO NOT just output generic classifications. Extract the exact document type as a string based on what is printed:
-
-**Guidelines**:
-1. **"統一發票"** - If it is a standard Taiwan GUI (e.g. 2 Letters + 8 Digits, has "電子發票證明聯", QR codes, "載具"). ALWAYS output exactly "統一發票".
-2. **"進口報單" or "海關進口快遞貨物稅費繳納證明"** - Output exactly what the document states.
-3. **Specific Document Names** - Provide the exact name: "Invoice", "Commercial Invoice", "Receipt", "Debit Note", etc.
-4. **"非發票" (Delivery Notes / Packing Lists / Order Documents)** - If it is a "銷貨單", "出貨單", "送貨單", "訂單出貨憑證", "出貨通知單", "Packing List", "出貨憑證", "估價單", "驗收單", "收料單" (documents without finalized tax/sales amounts or are just delivery proofs), set error_code="NOT_INVOICE". These are support documents that ACCOMPANY invoices — do NOT extract them as invoices. **Exception: In a multi-page PDF, if a later page contains a 統一發票, extract that invoice and ignore the delivery note page. Only mark NOT_INVOICE when the entire document has no 統一發票 at all.**
-
-### 1. Field Extraction Rules
-- **Currency**: Extract the currency code (e.g., TWD, USD, EUR, JPY, CNY). If no currency is explicitly listed or context clearly implies NT$, output "TWD".
-- **Invoice Number**: For standard GUI, must be 2 English Letters + 8 Digits. Remove spaces. For others, extract the exact number.
-- **Amounts**: You MUST output the exact numbers printed on the image. 
-- **CRITICAL ZERO RULE FOR AMOUNTS**: If a specific monetary value (e.g. Sales Amount, Tax Amount) is NOT visibly printed on the document, YOU MUST OUTPUT 0. Under NO CIRCUMSTANCES should you hallucinate numbers or invent taxes if they are not explicitly printed. DO NOT calculate numbers that are not there to "balance" an equation.
-- **Date**: Normalize to YYYY-MM-DD.
-  ROC Year Rules (CRITICAL — handwritten invoices often use ROC year):
-  - Handwritten "115年3月2日" → 115+1911=2026 → "2026-03-02"
-  - Slash/dot format "115/3/2" or "115.3.2" → "2026-03-02"
-  - Pure numeric YYYMMDD "1150302" → "2026-03-02"
-  - If year is 3 digits (e.g. 113, 114, 115) → it is ROC year → add 1911
-  - If year is 4 digits starting with 20xx → it is AD year → use as-is
-  - NEVER output a year below 1911 or above 2100
-- **Tax IDs**: Must be 8 digits for Taiwan companies.
-- **Seller Tax ID (賣方統編) — CRITICAL for 三聯收銀 T302**:
-  On a 三聯收銀 invoice, the "買受人" field contains the BUYER's tax ID — this is NOT the seller.
-  The seller's tax ID is found in: (a) the seller's company header block at the top of the invoice form, OR (b) the accompanying 訂單出貨憑證 under "統一編號/郵編" next to the seller's company name.
-  NEVER output the tax ID next to "買受人:" as seller_tax_id.
-  If seller tax ID cannot be found on the invoice, output null — the system will look it up from the database.
-- **Buyer Tax ID (buyer_tax_id)**: On 三聯手寫 (T300) invoices, the buyer's tax ID is at the lower-left section labeled '買受人統一編號' or '買受人'. Extract exactly 8 digits. Use '?' for any digit obscured by grid lines, stamps, or unclear handwriting (e.g. '165?7744'). Output null if the field is entirely absent or unreadable.
-
-### 3. Tax Code Classification (稅別 tax_code) — 對照 Tiptop 系統
-Based on the document type and content, assign ONE of the following codes:
-- **"T300"**: 三聯式手開統一發票（手寫填入，發票格式21）→ voucher_type="三聯手寫"
-- **"T301"**: 三聯式電子發票（印有「電子發票證明聯」字樣，發票格式25）→ voucher_type="三聯電子"
-- **"T302"**: 三聯式收銀機統一發票（印有「收銀機統一發票」字樣，**三聯**，有「扣抵聯」或「買受人存根聯」字樣，格式25，A4橫式或接近A4尺寸）→ voucher_type="三聯收銀"
-- **"T400"**: 海關進口貨物稅費繳納憑單（customs import tax，發票格式28）
-- **"T500"**: 二聯式收銀機統一發票（印有「收銀機統一發票」字樣，**二聯**，無「扣抵聯」文字，**長條型窄紙**（熱感應收據紙，類似超市收據），格式22，常見停車場、加油站、超市、便利商店）OR 車票（台灣鐵路、Metro、高鐵、客運、捷運 ticket）
-- **"TXXX"**: All other: 收據（免用統一發票、計程車收據）、English Invoice（外國廠商）、旅行社代收轉付收据
-
-**KEY DISTINCTION T301 vs T302**:
-- T301 (三聯電子): MUST have "電子發票證明聯" text. Has "格式25" or "格式 25" printed. Needs e-invoice platform upload.
-- T302 (三聯收銀): Has "收銀機統一發票" text, shows "(三聯式" or "扣抵聯", NO QR codes, NO "電子發票" text.
-
-**KEY DISTINCTION T302 vs T500** ← THIS IS CRITICAL, BOTH HAVE "收銀機統一發票":
-- T302 (三聯收銀, 格式25): **THREE-PART** invoice. Has "扣抵聯" OR "買受人存根聯" OR "收執聯" printed. Paper size is approximately A4 or half-A4 (wider format). The invoice has a grid with 買受人 / 品名 / 數量 / 單價 columns. Commonly issued by B2B suppliers.
-- T500 (二聯收銀, 格式22): **TWO-PART** invoice. **NO "扣抵聯" text anywhere**. Paper is a **narrow thermal receipt strip** (長條型熱感紙，寬約7-8cm). Commonly issued by: parking lots (停車場), gas stations (加油站), supermarkets (超市), convenience stores (便利商店). If the document looks like a long narrow receipt strip → it is T500, NOT T302.
-
-**KEY DISTINCTION T300 vs T302**:
-- T300 (手寫): The monetary amounts and buyer info are written by hand/pen/ink. No "收銀機" text. Format 21. The invoice form has blank lines to fill in — amounts are hand-filled.
-- T302 (收銀): ALL amounts are machine-printed (laser/thermal). **HARD REQUIREMENT: the text "收銀機統一發票" MUST appear printed on the invoice form itself. If you cannot find "收銀機統一發票" on the document → it is NOT T302. Do not assign T302 just because a delivery note on the same page is machine-printed.**
-
-- ⚠️ MIXED PAGE WARNING — THIS IS VERY COMMON: A scanned PDF page frequently contains BOTH a 三聯手寫 invoice (pink/red paper, handwritten amounts) AND a 訂單出貨憑證 / 送貨單 (printed delivery note with item table, QR code, 買方品號, 規格, 單價) placed or stapled together and scanned as one image.
-
-  **STEP 1 — LOCATE the 統一發票**: Find the form that has: (a) a 2-letter + 8-digit invoice number (e.g. VT44914261), (b) labeled cells for 銷售額合計, 營業稅, and 總計 or 應付金額, (c) a government-format invoice grid.
-
-  **STEP 2 — IGNORE the 訂單出貨憑證**: The delivery note has item codes (料號), quantities (數量), unit prices (單價), QR codes, and a company-specific document number (e.g. P02-PB0088). It is a support document. **NEVER extract amounts from it. NEVER let its machine-printed appearance influence your tax_code or voucher_type.**
-
-  **STEP 3 — CLASSIFY from the invoice only**:
-  → If the invoice amounts are written in ink/pen (hand-filled) → T300 三聯手寫, regardless of how the delivery note looks.
-  → If "收銀機統一發票" is printed on the invoice form AND all amounts are machine-printed → T302 三聯收銀.
-  → When in doubt between T300 and T302: if ANY amount cell appears hand-filled → choose T300.
-  → **ABSOLUTE RULE for T302**: The exact text "收銀機統一發票" MUST be physically printed in the invoice form's header or title area. If this text is absent, it is T300 — full stop. The presence of machine-printed delivery notes (出貨單) elsewhere in the same PDF does NOT make an invoice T302. Each invoice page must be classified solely from its own form content, independent of all other pages in the PDF.
-
-  **STEP 4 — EXTRACT amounts from the invoice grid ONLY**:
-  → 銷售額 (sales) comes from the 銷售額合計 / 未稅金額 cell of the 統一發票.
-  → 營業稅 (tax) comes from the 營業稅 cell of the 統一發票.
-  → NEVER use amounts from the 訂單出貨憑證's 金額 column, 含稅金額, or 稅額 fields.
-
-**CRITICAL SKIP RULES** - set error_code to "NOT_INVOICE" for these:
-1. English "Invoice" documents (foreign supplier invoices without TW invoice number)
-2. Transportation tickets (高鐵、火車、客運、捷遊 ticket, etc.) - set tax_code="T500" then skip
-3. Pure 訂單出貨憑證 / 送貨單 / 出貨通知單 pages with NO attached 統一發票 — these are delivery support docs, not invoices. **IMPORTANT: For multi-page PDFs, you MUST scan ALL pages before deciding. A page 1 delivery note (出貨憑證) followed by a page 2 統一發票 is a valid invoice document — extract the 統一發票 from page 2, ignore the delivery note. Only set NOT_INVOICE if the ENTIRE document contains zero 統一發票 forms.**
-
-### 4. Voucher Type Classification (voucher_type)
-Must be consistent with tax_code:
-- **"三聯手寫"**: T300 — 手寫填入三聯發票，格式21
-- **"三聯收銀"**: T302 — 收銀機三聯發票，格式25，無QR code
-- **"三聯電子"**: T301 — 電子發票證明聯，格式25
-- **"二聯收銀"**: T500 — 收銀機二聯發票，格式22
-- **"收據"**: TXXX — 各類收據（計程車、停車場、免用統一發票）
-- **"交通票券"**: T500 — 高鐵/火車/客運/捷運票券（台灣高鐵電子車票證明、台鐵票、客運票等）
-- **"Invoice"**: TXXX — 英文Invoice（外國廠商）
-- **"其他"**: 其他（T400海關、進口報單等）
-
-### 2. Output Format
-Return ONLY valid JSON matching the schema.
-Confidence Scoring: For EACH field, assign a score (0-100).
-`;
+function getTypeSpecificPrompt(tax_code?: string | null): string {
+  if (!tax_code) return '';
+  switch (tax_code) {
+    case 'T300': return PROMPT_T300;
+    case 'T301': return PROMPT_T301;
+    case 'T302': return PROMPT_T302;
+    case 'T500': return PROMPT_T500;
+    case 'TXXX': return PROMPT_TXXX;
+    default: return '';
+  }
+}
 
 
 
@@ -114,8 +42,7 @@ const invoiceObjectSchema = {
     },
     voucher_type: {
       type: "STRING",
-      enum: ["三聯手寫", "三聯收銀", "三聯電子", "二聯收銀", "收據", "交通票券", "Invoice", "其他"],
-      description: "Fine-grained voucher format type per section 4 of instructions"
+      description: "Fine-grained voucher format type. Common values: 三聯手寫, 三聯收銀, 三聯電子, 二聯收銀, 收據, 交通票券, Invoice, 其他. New types will be auto-captured."
     },
     tax_code: {
       type: "STRING",
@@ -178,7 +105,16 @@ const responseSchema = {
 // 輔助函式：等待
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export const analyzeInvoice = async (base64Data: string, mimeType: string, modelName: string = 'gemini-1.5-flash', retryCount = 0, knownSellers: Record<string, string> = {}, expectedERP?: ExpectedERP, validationRetryCount = 0): Promise<InvoiceData[]> => {
+export const analyzeInvoice = async (
+  base64Data: string,
+  mimeType: string,
+  modelName: string = 'gemini-1.5-flash',
+  retryCount = 0,
+  knownSellers: Record<string, string> = {},
+  expectedERP?: ExpectedERP,
+  validationRetryCount = 0,
+  skipValidationRetry = false
+): Promise<InvoiceData[]> => {
   // Support both process.env.GEMINI_API_KEY (User instruction) and process.env.API_KEY (System standard)
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || process.env.API_KEY;
 
@@ -205,7 +141,6 @@ export const analyzeInvoice = async (base64Data: string, mimeType: string, model
     console.log("Base64Data Length:", base64Data.length);
     console.log("MimeType:", mimeType);
     console.log("ContentPart:", JSON.stringify(contentPart, null, 2));
-    console.log("SystemInstruction (Type):", typeof SYSTEM_INSTRUCTION);
 
 
     let promptText = `Extract all invoice data from this document.
@@ -217,6 +152,13 @@ If the document image contains MULTIPLE physical invoices (e.g. two invoices sid
 3. Return one separate JSON object per invoice, in left-to-right or top-to-bottom order.
 4. Each object MUST have its own unique invoice_number, invoice_date, and amounts. If two objects end up with the same invoice_number — you made an error: re-examine the image carefully.
 5. Common layouts: two invoices side by side (左右兩張), same paper vertically split, or physically stacked/stapled scans.
+
+**SPECIAL CASE — NARROW THERMAL RECEIPT (二聯收銀) NEXT TO ANOTHER INVOICE**:
+A very common layout in expense reports: a narrow thermal strip receipt (長條型二聯收銀, T500, e.g. from parking lots, shoe stores, gas stations) is placed or taped NEXT TO a larger invoice (e.g. 電子發票證明聯 or 三聯手寫). In this layout:
+- The narrow strip on the LEFT (or RIGHT) is a SEPARATE invoice — extract it independently with its own invoice_number and amounts (合計/總計 printed on the strip).
+- Do NOT let the larger invoice's amounts bleed into the narrow strip's fields.
+- Even if the narrow strip's text is small or compressed, zoom in and read the 合計 or 總計 line carefully.
+- Return TWO separate JSON objects: one for each physical document.
 
 **DATA INTEGRITY CHECK**: Before returning, verify:
 - Do all returned invoice_numbers look distinct from each other? If not, re-read that invoice area.
@@ -240,6 +182,24 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
       }
     }
 
+    // ===== 動態 prompt 組合 =====
+    let systemPrompt = PROMPT_BASE;
+
+    // 如果是重試且 expectedERP 有 tax_code，載入對應類型的詳細 prompt
+    if (validationRetryCount > 0 && expectedERP?.tax_code) {
+      const typePrompt = getTypeSpecificPrompt(expectedERP.tax_code);
+      if (typePrompt) systemPrompt += '\n\n' + typePrompt;
+    }
+
+    // 沒有已知 tax_code 時，載入 unknown 類型的引導
+    if (!expectedERP?.tax_code) {
+      const registry = getRegistry();
+      const unknownPrompt = buildUnknownTypePrompt(registry);
+      systemPrompt += '\n\n' + unknownPrompt;
+    }
+
+    console.log("SystemInstruction (Type):", typeof systemPrompt);
+
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: effectiveModel, // Use the real model name (stripped of hybrid suffix)
       contents: {
@@ -249,7 +209,7 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
         ]
       },
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: systemPrompt,
         responseMimeType: "application/json",
         responseSchema: responseSchema,
       },
@@ -315,6 +275,25 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
       // Default success if not specified
       if (!item.error_code) item.error_code = "SUCCESS" as any;
       logs.push(`Initial Error Code: ${item.error_code}`);
+
+      // --- a) N 張驗證 ---
+      if (expectedERP?.invoice_numbers && expectedERP.invoice_numbers.length > 1) {
+        const extractedNos = results.filter(r => r.invoice_number).map(r => r.invoice_number!);
+        if (extractedNos.length < expectedERP.invoice_numbers.length) {
+          logs.push(`[N-張驗證] ERP expects ${expectedERP.invoice_numbers.length} invoice(s) (${expectedERP.invoice_numbers.join(', ')}), but only ${extractedNos.length} found.`);
+          if (!item.verification.flagged_fields.includes('count_mismatch')) {
+            item.verification.flagged_fields.push('count_mismatch');
+          }
+        }
+      }
+
+      // --- b) 空間一致性 check ---
+      if (results.length === 1) {
+        logs.push(`[空間check] Single result extracted. If document image is wide (width/height > 1.8), may contain multiple invoices - manual review suggested.`);
+        if (!item.verification.flagged_fields.includes('possible_multiple_invoices')) {
+          item.verification.flagged_fields.push('possible_multiple_invoices');
+        }
+      }
 
       // --- TAX CODE CLASSIFICATION ---
       // Determine tax_code based on voucher_type/document_type if AI didn't assign one
@@ -475,26 +454,33 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
         }
       }
 
-      // Rule 3: Validating & Auto-Correcting Amounts (amount_total = amount_sales + amount_tax)
-      const sales = item.amount_sales || 0;
-      const tax = item.amount_tax || 0;
-      const total = item.amount_total || 0;
-
-      // Auto-Swap Logic: If Total < Tax, it's likely swapped
-      if (total > 0 && total < tax) {
-        const temp = total;
-        item.amount_total = tax;
-        item.amount_tax = temp;
-        logs.push(`Fixed: Swapped Total (${temp}) and Tax (${total})`);
+      // --- c) 自動金額修正 ---
+      const amountFix = autoCorrectAmounts(item);
+      if (amountFix.corrected) {
+        logs.push(amountFix.log);
       }
 
-      const calculatedTotal = (item.amount_sales || 0) + (item.amount_tax || 0);
-      if (Math.abs((item.amount_total || 0) - calculatedTotal) > 1) {
-        logs.push(`Rule 3: Amount Mismatch - auto-correcting total from ${item.amount_total} to ${calculatedTotal}`);
-        item.amount_total = calculatedTotal;
-        item.verification.logic_is_valid = true; // We fixed it
-      } else {
-        logs.push(`Rule 3: Amount Logic Valid`);
+      // --- d) 結構化驗證 ---
+      const validationFailures = validateInvoice(item);
+      if (validationFailures.length > 0) {
+        validationFailures.forEach(f => {
+          if (!item.verification.flagged_fields.includes(f.field)) {
+            item.verification.flagged_fields.push(f.field);
+          }
+        });
+        logs.push(`[驗證] ${validationFailures.length} validation error(s) found: ${validationFailures.map(f => f.field).join(', ')}`);
+      }
+
+      // --- e) 未知類型記錄 ---
+      if (item.voucher_type && !isKnownType(item.voucher_type)) {
+        recordUnknownType(
+          item.document_type || 'unknown',
+          item.voucher_type,
+          item.tax_code,
+          item.seller_name,
+          !!item.invoice_number
+        );
+        logs.push(`[Registry] Recorded unknown voucher_type: "${item.voucher_type}"`);
       }
 
       item.trace_logs = logs;
