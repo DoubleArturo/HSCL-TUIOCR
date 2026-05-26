@@ -2,6 +2,10 @@
 
 > 2026-05-26 建立，用於查詢過去會話的決策和發現
 
+## 🚨 動手前先看
+
+- [Quick Ref](../QUICK-REF.md) — TOP 10 踩坑 + 5 層診斷順序，1 頁紙
+
 ## 設計與架構
 
 - [設計決策](design-decisions.md) — 7 個核心設計的原理與權衡（claimedOCRInvNos、T500 skip、buyer_tax_id 等）

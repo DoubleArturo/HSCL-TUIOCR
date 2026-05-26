@@ -4,11 +4,13 @@
 
 set -e
 
-# Check 1: If auditLogic.ts changed, verify test file exists
+# Check 1: If auditLogic.ts changed, test file MUST also change
 if git diff --cached --name-only | grep -q "src/lib/auditLogic.ts"; then
   if ! git diff --cached --name-only | grep -q "src/lib/auditLogic.test.ts"; then
-    echo "⚠️  Warning: Modified auditLogic.ts but no test changes detected"
-    echo "   Please verify test coverage in src/lib/auditLogic.test.ts"
+    echo "❌ ERROR: Modified auditLogic.ts but no test changes detected"
+    echo "   CRITICAL rule: Every auditLogic.ts change requires corresponding test"
+    echo "   See: .claude/rules-and-checks.json RULE_001, .claude/CLAUDE.md L48"
+    exit 1
   fi
 fi
 

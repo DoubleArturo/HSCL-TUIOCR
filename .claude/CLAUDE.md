@@ -14,6 +14,7 @@
 ## 載入的模組
 
 永遠載入：
+- @.claude/QUICK-REF.md（TOP 10 踩坑速查，動手前先看）
 - @.claude/modules/CLAUDE-data-contract.md
 - @.claude/modules/CLAUDE-debug-rules.md
 - @.claude/modules/CLAUDE-testing-requirements.md
@@ -117,6 +118,40 @@
   📌 相關檔：auditLogic.ts L85–121（groupByVoucherId）  
   ⚠️ 容易踩坑：加新的配對邏輯時忘了 mark claimed  
   🛡️ 防護：見 design-decisions.md #1、auditLogic.test.ts L255–275
+
+---
+
+### AI Code-Change Checklist（動手前必讀）
+
+改 `auditLogic.ts` / `geminiService.ts` / `validationPipeline.ts` 前，依序檢查：
+
+**Step 1：定位影響範圍**
+- [ ] 我要改的是哪一條規則？對應 `.claude/rules-and-checks.json` 哪個 RULE_id？
+- [ ] 這條規則的 line_ranges 是否還準確？（若代碼已位移，先更新 JSON）
+- [ ] 我的改動會不會觸發禁止清單（CLAUDE.md L47–87）？
+
+**Step 2：讀依賴**
+- [ ] 讀目標檔案完整內容（不要片段 read）
+- [ ] 讀對應 test 檔（auditLogic.test.ts / geminiService.test.ts）
+- [ ] 讀 design-decisions.md 對應 # 號條目
+
+**Step 3：寫測試（先於實作）**
+- [ ] 為新行為寫一個會失敗的測試
+- [ ] 為現有行為確認還有測試覆蓋（不會被改壞）
+- [ ] 若新增 tax_code / voucher_type：必須有對應 isCountableForAmount / shouldSkipFromAudit 的測試
+
+**Step 4：實作**
+- [ ] 改動後本地跑 `npm test`（必須 100% pass）
+- [ ] 改動行數 < 50 行？若超過，是否該拆 commit？
+- [ ] 是否動到了禁止清單裡的 Set / skip / norm / 三層去重邏輯？
+
+**Step 5：驗證 + 文檔同步**
+- [ ] 更新 CLAUDE-ocr-business-logic.md 版本戳（若改 prompt 或 11 步後處理）
+- [ ] 更新 rules-and-checks.json line_ranges（若行號位移）
+- [ ] 若解了一個 bug，更新 known-bugs.md（標記 ✅ 已修復 + commit hash）
+
+**Step 6：金額不符紅燈時的診斷順序**
+若改完後監控發現 AMOUNT_MISMATCH 率升高，按 known-bugs.md「金額不符診斷樹」5 層逐項檢查。
 
 ---
 
