@@ -744,6 +744,12 @@ const App: React.FC = () => {
             return;
         }
 
+        const auditRow = useAuditList(project?.erpData || [], project?.invoices || []).find(row => row.key === id);
+        if (auditRow?.auditStatus === 'SKIPPED') {
+            alert('此項目已跳過審計，不需辨識 OCR');
+            return;
+        }
+
         updateProjectInvoices(prev => prev.map(inv =>
             inv.id === id ? { ...inv, status: 'PENDING' as const, data: [], error: undefined } : inv
         ));
@@ -1329,7 +1335,9 @@ const App: React.FC = () => {
                                                     </div>
                                                 </td>
                                                 <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => setSelectedKey(row.key)}>
-                                                    {row.file ? (
+                                                    {isSkipped ? (
+                                                        <span className="text-gray-400 italic">-</span>
+                                                    ) : row.file ? (
                                                         <>
                                                             {row.file.status === 'PROCESSING' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : (hasOcrButNoFile ? <FileSearch className="w-3.5 h-3.5 text-amber-400" /> : <FileText className="w-3.5 h-3.5 text-indigo-300" />)}
                                                             <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
