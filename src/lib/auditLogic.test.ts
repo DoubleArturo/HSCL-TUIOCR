@@ -360,3 +360,25 @@ describe('computeAuditRows - Fix 2: duplicate voucher_id grouping', () => {
     expect(row2?.diffDetails.length).toBe(0);
   });
 });
+
+describe('computeAuditRows - TXXX skipping', () => {
+  it('ERP with tax_code=TXXX should be skipped regardless of OCR', () => {
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'TXXX', amount_total: 999 })],
+      [makeEntry('G11-Q10001', makeOCR({ tax_code: 'T302', amount_total: 1050 }))]
+    );
+    expect(rows[0].auditStatus).toBe('SKIPPED');
+    expect(rows[0].diffDetails).toHaveLength(0);
+  });
+
+  it('OCR with tax_code=TXXX should be skipped from audit diffs', () => {
+    const txxx = makeOCR({ tax_code: 'TXXX', seller_tax_id: '99999999' });
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T302', seller_tax_id: '12345678' })],
+      [makeEntry('G11-Q10001', txxx)]
+    );
+    // Invoice numbers match, but tax_id differs
+    // However, TXXX OCR should be skipped from tax_id diff
+    expect(rows[0].diffDetails).not.toContain('tax_id');
+  });
+});

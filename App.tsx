@@ -1253,6 +1253,7 @@ const App: React.FC = () => {
                                         let isMissing = row.auditStatus === 'MISSING_FILE';
                                         const isExtra = row.auditStatus === 'EXTRA_FILE';
                                         const isMatch = row.auditStatus === 'MATCH';
+                                        const isSkipped = row.auditStatus === 'SKIPPED';
                                         const isPending = row.file?.status === 'PENDING';
                                         const hasOcrButNoFile = row.file && !row.file.previewUrl && row.file.status === 'SUCCESS';
 
@@ -1261,7 +1262,7 @@ const App: React.FC = () => {
                                         const isInvoiceRow = row.ocr?.voucher_type === 'Invoice' || row.ocr?.document_type === 'Invoice' || row.ocr?.document_type === 'Commercial Invoice';
 
                                         return (
-                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending && !isInvoiceRow ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
+                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending && !isInvoiceRow ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${isSkipped ? 'bg-gray-100/30' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
                                                 <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing || isPending ? 'text-slate-400' : 'text-slate-700'}`}>
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{row.id}</span>
@@ -1301,6 +1302,7 @@ const App: React.FC = () => {
                                                         {!isPending && isInvoiceRow && <CheckCircle2 className="w-5 h-5 text-slate-300" />}
                                                         {!isPending && !isInvoiceRow && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
                                                         {!isPending && !isInvoiceRow && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
+                                                        {!isPending && isSkipped && <><CheckCircle2 className="w-5 h-5 text-slate-400" /><span className="text-[9px] text-slate-500 font-bold mt-0.5">已跳過</span></>}
                                                         {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
                                                         
                                                         {!isMissing && (row.ocr?.voucher_type || row.ocr?.document_type) && (

@@ -22,7 +22,17 @@ function isCountableForAmount(inv: InvoiceData): boolean {
 }
 
 function shouldSkipFromAudit(inv: InvoiceData): boolean {
-  return isForeignInvoice(inv.document_type) || inv.voucher_type === 'Invoice';
+  // Skip audit for: foreign invoices, non-invoice documents, and other/miscellaneous items
+  if (isForeignInvoice(inv.document_type) || inv.voucher_type === 'Invoice') return true;
+
+  // Skip documents that are not billable invoices
+  const unbillableTypes = ['Packing List', 'Delivery Note', 'Receipt', 'Other', '其他'];
+  if (inv.document_type && unbillableTypes.some(t => inv.document_type?.includes(t))) return true;
+
+  // Skip TXXX (miscellaneous/receipt items) — not subject to audit matching
+  if (inv.tax_code === 'TXXX') return true;
+
+  return false;
 }
 
 /**
@@ -81,7 +91,11 @@ export function computeAuditRows(
 
       let matchedOCRInvoices: InvoiceData[] = [];
 
-      if (matchingFiles.length === 0) {
+      // Skip audit for ERP rows that are TXXX (miscellaneous/non-billable items)
+      const erpTaxCode = (erp.tax_code || '').toUpperCase();
+      if (erpTaxCode === 'TXXX') {
+        auditStatus = 'SKIPPED';
+      } else if (matchingFiles.length === 0) {
         auditStatus = 'MISSING_FILE';
       } else if (allOCRInvoices.length > 0) {
         const erpInvNos = erp.invoice_numbers.map(normInvNo);
