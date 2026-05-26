@@ -20,8 +20,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Invoices
-Test Data
+# Invoices (ignore audit data, but keep Golden Test Sample)
+Test Data/*
+!Test Data/Golden Test Sample/
 System Debug Log
 .worktrees/
 
