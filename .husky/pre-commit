@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Pre-commit hook: Verify documentation stays in sync with code changes
+
+set -e
+
+# Check 1: If auditLogic.ts changed, verify test file exists
+if git diff --cached --name-only | grep -q "src/lib/auditLogic.ts"; then
+  if ! git diff --cached --name-only | grep -q "src/lib/auditLogic.test.ts"; then
+    echo "⚠️  Warning: Modified auditLogic.ts but no test changes detected"
+    echo "   Please verify test coverage in src/lib/auditLogic.test.ts"
+  fi
+fi
+
+# Check 2: If geminiService.ts changed, warn about doc sync
+if git diff --cached --name-only | grep -q "services/geminiService.ts"; then
+  if ! git diff --cached --name-only | grep -q ".claude/modules/CLAUDE-ocr-business-logic.md"; then
+    echo "⚠️  Remember to sync: geminiService.ts change → update CLAUDE-ocr-business-logic.md version stamp"
+  fi
+fi
+
+# Check 3: If new tax_code added, check test coverage
+if git diff --cached services/geminiService.ts | grep -q "case '"; then
+  echo "ℹ️  Detected tax_code/type change. Ensure:"
+  echo "   - Test case added for new type"
+  echo "   - CLAUDE-ocr-business-logic.md updated"
+  echo "   - design-decisions.md checked if architectural impact"
+fi
+
+# Check 4: Verify rules-and-checks.json not broken
+if git diff --cached --name-only | grep -q ".claude/rules-and-checks.json"; then
+  if ! node -e "JSON.parse(require('fs').readFileSync('.claude/rules-and-checks.json'))" 2>/dev/null; then
+    echo "❌ ERROR: .claude/rules-and-checks.json has invalid JSON"
+    exit 1
+  fi
+fi
+
+echo "✓ Pre-commit checks passed"

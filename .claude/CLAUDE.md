@@ -20,8 +20,9 @@
 - @.claude/memory/design-decisions.md（設計決策、為什麼這樣做）
 - @.claude/memory/known-bugs.md（已知問題、邊界情況）
 
-按需載入（修改 OCR / 審計 / Gemini prompt 相關時）：
-- @.claude/modules/CLAUDE-ocr-business-logic.md
+按需載入：
+- @.claude/modules/CLAUDE-ocr-business-logic.md（修改 OCR / 審計 / Gemini prompt 相關時）
+- @.claude/rules-and-checks.json（修改 auditLogic / geminiService 時用 JSON 自動檢查）
 
 ---
 
