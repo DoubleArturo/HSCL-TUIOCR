@@ -1251,7 +1251,6 @@ const App: React.FC = () => {
                                     {auditList.map((row) => {
                                         const isMismatch = row.auditStatus === 'MISMATCH';
                                         let isMissing = row.auditStatus === 'MISSING_FILE';
-                                        const isExtra = row.auditStatus === 'EXTRA_FILE';
                                         const isMatch = row.auditStatus === 'MATCH';
                                         const isSkipped = row.auditStatus === 'SKIPPED';
                                         const isPending = row.file?.status === 'PENDING';
@@ -1266,7 +1265,6 @@ const App: React.FC = () => {
                                                 <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing || isPending ? 'text-slate-400' : 'text-slate-700'}`}>
                                                     <div className="flex items-center gap-1.5">
                                                         <span>{row.id}</span>
-                                                        {isExtra && <span className="text-[10px] bg-amber-100 text-amber-700 px-1 rounded">無 ERP</span>}
                                                         {row.erp && (
                                                             <button
                                                                 title={row.erp.erpFlagged ? 'ERP 已標注待確認，點擊取消' : '標注此 ERP 資料待確認'}

@@ -61,9 +61,21 @@ describe('computeAuditRows - basic status', () => {
     expect(rows[0].auditStatus).toBe('MISSING_FILE');
   });
 
-  it('EXTRA_FILE when file has no ERP match', () => {
+  it('Issue 9: OCR file with no ERP match must NOT produce a synthetic row', () => {
     const rows = computeAuditRows([], [makeEntry('G11-Q10099', makeOCR())]);
-    expect(rows[0].auditStatus).toBe('EXTRA_FILE');
+    expect(rows).toHaveLength(0);
+  });
+
+  it('Issue 9: orphan OCR is dropped, but ERP-matched rows remain intact', () => {
+    const rows = computeAuditRows(
+      [makeERP({ voucher_id: 'G11-Q10001' })],
+      [
+        makeEntry('G11-Q10001', makeOCR()),
+        makeEntry('G11-Q99999', makeOCR()), // orphan
+      ],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe('G11-Q10001');
   });
 });
 

@@ -46,7 +46,6 @@ export function computeAuditRows(
   invoices: InvoiceEntry[],
 ): AuditRow[] {
   const fileMap = new Map<string, InvoiceEntry>(invoices.map(i => [i.id, i]));
-  const matchedFileIds = new Set<string>();
 
   // Fix 2: group ERP rows by voucher_id, preserving original order within each group
   const erpGroups = new Map<string, ERPRecord[]>();
@@ -69,8 +68,6 @@ export function computeAuditRows(
         matchingFiles.push(entry);
       }
     }
-    matchingFiles.forEach(f => matchedFileIds.add(f.id));
-
     // Collect and deduplicate OCR results across all matching files
     const rawAllOCR = matchingFiles.flatMap(f => f.data);
     const allOCRInvoices = rawAllOCR.filter((inv, i, self) =>
@@ -253,21 +250,9 @@ export function computeAuditRows(
     });
   }
 
-  const extraFiles: AuditRow[] = invoices
-    .filter(f => !matchedFileIds.has(f.id))
-    .map(f => ({
-      key: `extra_${f.id}`,
-      id: f.id,
-      erp: null,
-      files: [f],
-      file: f,
-      ocr: f.data[0] || null,
-      auditStatus: 'EXTRA_FILE' as const,
-      diffDetails: [],
-      initialInvoiceIndex: 0,
-    }));
-
-  return [...mappedRows, ...extraFiles].sort((a, b) => a.id.localeCompare(b.id));
+  // Issue 9 fix: OCR files with no matching ERP record are intentionally dropped.
+  // Per product decision, audit list should not synthesize rows for orphan uploads.
+  return mappedRows.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** Human-readable label for each diff key. */

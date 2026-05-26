@@ -95,9 +95,7 @@ matchedOCRInvoices = []; // AB 已被 claim
 見 `auditLogic.test.ts` L229–276（Fix 2 cases）
 
 **改動風險**  
-❌ **禁止**在 ERP 迴圈外初始化 Set → 會重置  
-❌ **禁止**改成陣列 `[].includes()` → 性能下降  
-⚠️ **修改此邏輯時**：需同時修改 5 個地方（L85 init、L118 add、L104 has、L170 fallback、L172 fallback add）
+見 `.claude/CLAUDE.md` 禁止清單 #1。修改此邏輯需同步 5 處：L85 init、L118 add、L104 has、L170 fallback、L172 fallback add。
 
 ---
 
@@ -116,15 +114,7 @@ matchedOCRInvoices = []; // AB 已被 claim
 - T500 OCR：用 voucher_type 判定（交通票券 → 不計，二聯 → 計）
 
 **改動風險**  
-⚠️ **謹慎**：若改動 T500 判定，需確保：
-1. ERP 層級 skip 邏輯不變
-2. OCR 層級 voucher_type 能正確判定
-3. 測試涵蓋「T500 二聯有發票號」的 case
-
-相關檔：
-- `auditLogic.ts` L129–134（ERP T500 skip）
-- `auditLogic.ts` L10–12（isCountableForAmount）
-- `geminiService.ts` prompt（voucher_type 判定）
+見 `.claude/CLAUDE.md` 禁止清單 #2。改動 T500 判定需驗證：(a) ERP 層級 skip 不變、(b) OCR voucher_type 能正確判定、(c) 測試涵蓋「T500 二聯有發票號」case。
 
 **測試驗證**  
 見 `auditLogic.test.ts` L159–193（Fix 1 T500 cases）
@@ -166,13 +156,7 @@ matchedOCRInvoices = []; // AB 已被 claim
 允許 '?' 佔位符，在 flagged_fields 記錄警告，UI 標紅。
 
 **改動風險**  
-❌ **禁止**改成「無法辨識就回傳 null」  
-⚠️ **謹慎**：若提高辨識精度（如用 Vision API 手寫辨識），需同步調整 flag 邏輯
-
-相關檔：
-- `geminiService.ts` L57（schema 允許 '?'）
-- `auditLogic.ts` L163–164（flag 辨識）
-- `App.tsx` L1381（UI 紅字標記）
+見 `.claude/CLAUDE.md` 常見踩坑「buyer_tax_id 含 '?'」。若提高辨識精度（如用 Vision API 手寫辨識），需同步調整 flag 邏輯。
 
 ---
 
@@ -192,6 +176,31 @@ matchedOCRInvoices = []; // AB 已被 claim
 
 **改動風險**  
 ⚠️ **驗證**：upsertSeller() 是否有 `if (taxId === '16547744') return;` 檢查？
+
+---
+
+## Issue 9：OCR 有但 ERP 無時，不應自動補一列 ✅ 已修
+
+**症狀**  
+- 使用者上傳一張發票，OCR 成功辨識
+- 但這張發票不在當期 ERP 資料中（可能是別月份、或誤上傳）
+- 系統自動補一列 `auditStatus = 'EXTRA_FILE'`，造成總列數虛增
+
+**根因**  
+`auditLogic.ts` L256–268：`extraFiles` 把所有未 match 的 OCR 檔案都建一列。
+
+**解法（方案 A — 完全移除）**  
+- `auditLogic.ts`：移除 `extraFiles` 區段，只 return `mappedRows.sort(...)`；同時清掉死碼 `matchedFileIds` Set 和 L72 的 `matchedFileIds.add()`
+- `App.tsx`：移除 `isExtra` 變數和「無 ERP」amber badge（L1254、L1269）
+- `auditLogic.test.ts`：原 EXTRA_FILE 測試改成 `expect(rows).toHaveLength(0)`，並新增「orphan OCR 不影響其他 ERP-match 列」測試
+- `types.ts`、`csvExport.ts`：保留 `'EXTRA_FILE'` union 與 label 對映，避免外部消費端炸（實際不再產生）
+
+**驗證**  
+`npm test -- auditLogic` → 23/23 通過。
+
+**改動風險（已評估）**  
+- 副作用：上傳孤兒檔案後不再顯示，使用者除錯時可能不易發現「為何這張發票沒入帳」→ 後續若需要可加獨立的「未對應檔案」UI 區塊（方案 B）
+- 死碼 `matchedFileIds` 已清除，避免下次 onboard 工程師誤以為還在用
 
 ---
 
@@ -226,6 +235,73 @@ Fix 2 修復：`validOCRForAmount` 先篩選已 match 的 OCR，再加總。
 
 ---
 
+## 金額不符診斷樹
+
+線上發現金額不符（auditStatus = AMOUNT_MISMATCH）時，按優先級檢查：
+
+**第 1 層：型別篩選**
+```
+amount_sales/amount_tax 有差值
+  ↓ isCountableForAmount() 檢查
+  ├─ voucher_type = '交通票券' → 預期跳過，不該在 diff
+  ├─ tax_code = 'TXXX' → 預期跳過，不該在 diff
+  └─ 以上都是 false → 進行金額比對
+```
+**檢查點：** auditLogic.ts L10–12，geminiService.ts prompt
+
+**第 2 層：多行同 voucher 去重**
+```
+同一 voucher_id 有多個 ERP 行（如物料費 + 加工費）
+  ↓ claimedOCRInvNos Set 追蹤
+  ├─ row1 claim [AB, CD] → Set 記錄 {AB, CD}
+  ├─ row2 嘗試 match AB → 失敗（已被 claim）
+  └─ row2 fallback [CD] → Set 已有，也失敗
+```
+**檢查點：** auditLogic.ts L85–121，L104 has() 檢查
+
+**第 3 層：發票號正規化**
+```
+發票號比對失敗（matched = 0）
+  ↓ normInvoiceNumber() 檢查
+  ├─ ERP: 'AB 123456' → norm → 'AB123456'
+  ├─ OCR: 'AB123456' → norm → 'AB123456' → 符合 ✓
+  └─ 未 norm 會導致虛假不符
+```
+**檢查點：** auditLogic.ts L70–73（normInvNo）、L97（應用）
+
+**第 4 層：Type skip 一致性**
+```
+OCR skip 但 ERP 未 skip（或反之）
+  ↓ shouldSkipFromAudit() vs ERP skip 邏輯
+  ├─ OCR document_type='Invoice' → skip（外國發票）
+  ├─ ERP 仍有此行 → 應該被 auditStatus=SKIPPED 排除
+  └─ 不同步 → 虛假 AMOUNT_MISMATCH
+```
+**檢查點：** auditLogic.ts L24–36 (shouldSkipFromAudit)、L95–99 (ERP skip)
+
+**第 5 層：Fallback 邏輯**
+```
+invoice_number 完全 miss（matchedOCRInvoices = []）
+  ↓ fallback OCR 比對（應有的發票，就算號碼不符也比金額）
+  ├─ 找到 fallback（amount 接近，未被 claim）
+  ├─ 用 fallback.amount_total vs erp.amount_total
+  └─ 無 fallback → 應該只記錄 inv_no diff，不記 amount
+```
+**檢查點：** auditLogic.ts L170–181 (fallback 邏輯)
+
+**實戰例子：G12-Q50007**
+- ERP: XW17220651 (T302, 11926, seller_tax_id=83632740)
+- OCR: 漏掉，但有 ZH56112376 (T301, 1050)
+- 診斷：
+  1. ✓ isCountableForAmount(ZH...) = true（T301 可計）
+  2. ✓ claimedOCRInvNos 確認 ZH... 未被其他行 claim
+  3. ✓ normInvoiceNumber('XW17220651') 正確
+  4. ✓ shouldSkipFromAudit(ZH...) = false（T301 不跳過）
+  5. ✓ fallback 邏輯：matchedOCRInvoices.length = 0，用 ZH... 比對
+  - 結果：應記錄 inv_no + amount + tax_code + tax_id diffs（4 個）
+
+---
+
 ## 回退策略
 
 若新改動導致線上爆掉，快速回退：
@@ -234,3 +310,4 @@ Fix 2 修復：`validOCRForAmount` 先篩選已 match 的 OCR，再加總。
 2. **檢查版本戳**：確認 CLAUDE-ocr-business-logic.md 的「Last verified」
 3. **記錄到本檔**：為什麼改動失敗、下次怎麼避免
 4. **監控金額不符率**：若超過平時 2 倍，立即 alert
+5. **用診斷樹除錯**：若金額不符率異常，按上述 5 層逐項檢查
