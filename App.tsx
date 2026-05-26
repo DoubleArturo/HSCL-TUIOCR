@@ -1333,7 +1333,7 @@ const App: React.FC = () => {
                                                         <>
                                                             {row.file.status === 'PROCESSING' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : (hasOcrButNoFile ? <FileSearch className="w-3.5 h-3.5 text-amber-400" /> : <FileText className="w-3.5 h-3.5 text-indigo-300" />)}
                                                             <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
-                                                                {row.ocr?.invoice_date ? <span className="text-xs text-indigo-300 mr-1">{row.ocr.invoice_date}</span> : null}
+                                                                {row.ocr?.invoice_date ? <span className={`text-xs mr-1 px-1 py-0.5 rounded ${row.diffDetails.includes('date') ? 'text-rose-600 font-bold bg-rose-100 border border-rose-300' : 'text-indigo-300'}`}>{row.ocr.invoice_date}</span> : null}
                                                                 {row.ocr?.error_code === 'BLURRY' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.EyeOff className="w-3 h-3" /> 影像模糊</span> :
                                                                         (row.ocr?.invoice_number || (row.file.status === 'PROCESSING' ? '...' :
                                                                             (row.file.status === 'ERROR' ? <span className="text-rose-500 font-bold" title={row.file.error}>{row.file.error || '辨識失敗'}</span> :
