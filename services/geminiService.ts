@@ -166,6 +166,12 @@ A very common layout in expense reports: a narrow thermal strip receipt (長條�
 
 **MULTI-PAGE PDF RULE**: This document may contain multiple pages. Even if page 1 is a delivery note (訂單出貨憑證 / 出貨通知單), you MUST check every subsequent page for a 統一發票. Extract the invoice from whichever page it appears on. Only output NOT_INVOICE if NO page in the entire document contains a 統一發票 form.
 
+**EMBEDDED INVOICE IMAGES / PHOTOCOPIED STUBS (CRITICAL)**: A page may contain photocopied, scanned, or printed-as-image invoice stubs — typically 收銀機統一發票 (cash register / 三聯式) thumbnails pasted or scanned alongside a delivery note. These are NOT decoration, NOT thumbnails, NOT illustrations. They ARE real, independent invoices that MUST be extracted as their own JSON objects with their own invoice_number, invoice_date, seller_name, seller_tax_id, amount_sales, amount_tax, amount_total. Indicators that a region is an embedded real invoice (not decoration):
+- Contains a readable 發票號碼 (e.g. XW17220651 format: 2 letters + 8 digits)
+- Contains 統一編號 / 統一發票 / 收銀機統一發票 wording
+- Contains 總計 / 應稅銷售額 / 營業稅 fields with numbers
+If you see N embedded invoice stubs on a page, the output array MUST include N corresponding objects — never collapse them into one, never skip them because they look small or low-res.
+
 If the ENTIRE document (all pages) contains only generic unbillable documents (Packing List, delivery note with no invoice anywhere), set 'error_code' to 'NOT_INVOICE' and output 0 for all amounts. If image is blurry, set 'error_code' accordingly.`;
 
     if (expectedERP && (expectedERP.amount_total !== undefined || expectedERP.amount_sales !== undefined || expectedERP.amount_tax !== undefined)) {
