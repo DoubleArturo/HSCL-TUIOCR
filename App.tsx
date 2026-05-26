@@ -744,12 +744,6 @@ const App: React.FC = () => {
             return;
         }
 
-        const auditRow = useAuditList(project?.erpData || [], project?.invoices || []).find(row => row.key === id);
-        if (auditRow?.auditStatus === 'SKIPPED') {
-            alert('此項目已跳過審計，不需辨識 OCR');
-            return;
-        }
-
         updateProjectInvoices(prev => prev.map(inv =>
             inv.id === id ? { ...inv, status: 'PENDING' as const, data: [], error: undefined } : inv
         ));
@@ -1340,21 +1334,28 @@ const App: React.FC = () => {
                                                     ) : row.file ? (
                                                         <>
                                                             {row.file.status === 'PROCESSING' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : (hasOcrButNoFile ? <FileSearch className="w-3.5 h-3.5 text-amber-400" /> : <FileText className="w-3.5 h-3.5 text-indigo-300" />)}
-                                                            <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
-                                                                {row.ocr?.invoice_date ? <span className={`text-xs mr-1 px-1 py-0.5 rounded ${row.diffDetails.includes('date') ? 'text-rose-600 font-bold bg-rose-100 border border-rose-300' : 'text-indigo-300'}`}>{row.ocr.invoice_date}</span> : null}
-                                                                {row.ocr?.error_code === 'BLURRY' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.EyeOff className="w-3 h-3" /> 影像模糊</span> :
-                                                                        (row.ocr?.invoice_number || (row.file.status === 'PROCESSING' ? '...' :
-                                                                            (row.file.status === 'ERROR' ? <span className="text-rose-500 font-bold" title={row.file.error}>{row.file.error || '辨識失敗'}</span> :
-                                                                                (hasOcrButNoFile ? '需補上傳' : '未對應'))))}
-                                                            </span>
-                                                            {hasOcrButNoFile && <span className="text-[9px] text-amber-600 bg-amber-50 px-1 rounded">資料已存/缺圖</span>}
-                                                            {isPending && (
-                                                                <button
-                                                                    onClick={(e) => { e.stopPropagation(); handleFiles([row.file!.file]); }}
-                                                                    className="ml-2 text-[9px] px-1.5 py-0.5 border border-indigo-200 text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-1 transition-colors bg-white font-bold"
-                                                                >
-                                                                    <Lucide.Play className="w-2.5 h-2.5" /> 原單續傳
-                                                                </button>
+                                                            {isPending ? (
+                                                                <>
+                                                                    <span className="text-gray-400 italic">-</span>
+                                                                    <button
+                                                                        onClick={(e) => { e.stopPropagation(); handleFiles([row.file!.file]); }}
+                                                                        className="ml-1 p-1 rounded text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                                                                        title="重新上傳憑證並辨識"
+                                                                    >
+                                                                        <UploadCloud className="w-3.5 h-3.5" />
+                                                                    </button>
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
+                                                                        {row.ocr?.invoice_date ? <span className={`text-xs mr-1 px-1 py-0.5 rounded ${row.diffDetails.includes('date') ? 'text-rose-600 font-bold bg-rose-100 border border-rose-300' : 'text-indigo-300'}`}>{row.ocr.invoice_date}</span> : null}
+                                                                        {row.ocr?.error_code === 'BLURRY' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.EyeOff className="w-3 h-3" /> 影像模糊</span> :
+                                                                                (row.ocr?.invoice_number || (row.file.status === 'PROCESSING' ? '...' :
+                                                                                    (row.file.status === 'ERROR' ? <span className="text-rose-500 font-bold" title={row.file.error}>{row.file.error || '辨識失敗'}</span> :
+                                                                                        (hasOcrButNoFile ? '需補上傳' : '未對應'))))}
+                                                                    </span>
+                                                                    {hasOcrButNoFile && <span className="text-[9px] text-amber-600 bg-amber-50 px-1 rounded">資料已存/缺圖</span>}
+                                                                </>
                                                             )}
                                                         </>
                                                     ) : <span className="text-gray-300 text-xs italic">等待上傳...</span>}
