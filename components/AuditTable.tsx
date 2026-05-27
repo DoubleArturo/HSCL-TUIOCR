@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Loader2, CheckCircle2, Edit3, FileSearch, FileText, AlertTriangle, UploadCloud } from 'lucide-react';
 import * as Lucide from 'lucide-react';
-import { AuditRow, Project } from '../types';
+import { AuditRow, Project, InvoiceData } from '../types';
+import { OCRFeedbackDialog } from '../src/components/OCRFeedbackDialog';
 
 interface AuditTableProps {
   auditList: AuditRow[];
@@ -13,7 +14,10 @@ interface AuditTableProps {
 }
 
 const AuditTable: React.FC<AuditTableProps> = ({ auditList, selectedKey, onRowClick, onReprocess, onToggleErpFlag, project }) => {
+  const [feedbackTarget, setFeedbackTarget] = useState<{ fileName: string; fileId: string; ocrResult: InvoiceData | null } | null>(null);
+
   return (
+    <>
     <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col flex-1">
       <div className="overflow-auto custom-scrollbar flex-1">
         <table className="w-full text-left border-collapse relative">
@@ -194,7 +198,23 @@ const AuditTable: React.FC<AuditTableProps> = ({ auditList, selectedKey, onRowCl
                   <td className={`px-1 py-3 text-center font-mono ${row.ocr?.seller_tax_id?.includes('?') ? 'text-amber-500 font-bold' : (row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : 'text-indigo-400')}`}>{row.ocr?.seller_tax_id || '-'}</td>
                   <td className="px-1 py-3 text-right pr-4">
                     {(row.file?.status === 'SUCCESS' || row.ocr) && (
-                      <div className="flex justify-end gap-1"><button className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" onClick={() => onRowClick(row.key)}><Edit3 className="w-3.5 h-3.5" /></button></div>
+                      <div className="flex justify-end gap-1">
+                        <button className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" onClick={() => onRowClick(row.key)}><Edit3 className="w-3.5 h-3.5" /></button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setFeedbackTarget({
+                              fileName: row.file?.file.name ?? row.erp?.voucher_id ?? '',
+                              fileId: row.file?.id ?? row.key,
+                              ocrResult: row.ocr ?? null,
+                            });
+                          }}
+                          className="p-1 text-gray-400 hover:text-orange-500 transition-colors rounded"
+                          title="回報 OCR 錯誤"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -204,6 +224,16 @@ const AuditTable: React.FC<AuditTableProps> = ({ auditList, selectedKey, onRowCl
         </table>
       </div>
     </div>
+    {feedbackTarget && (
+      <OCRFeedbackDialog
+        isOpen={true}
+        fileName={feedbackTarget.fileName}
+        fileId={feedbackTarget.fileId}
+        ocrResult={feedbackTarget.ocrResult}
+        onClose={() => setFeedbackTarget(null)}
+      />
+    )}
+    </>
   );
 };
 
