@@ -1,15 +1,17 @@
 
-import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Upload, Loader2, AlertCircle, CheckCircle2, Edit3, Trash2, FileSearch, Key, PlusSquare, FileDown, Clock, FileText, FileSpreadsheet, ArrowLeftRight, AlertTriangle, ArrowRight, UploadCloud, FolderOpen, ChevronRight, LogOut, Calendar, Database, Search, Plus, X } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Loader2, CheckCircle2, Edit3, Trash2, PlusSquare, ArrowLeftRight, UploadCloud, FolderOpen, ChevronRight, Calendar, Database, Search, Plus } from 'lucide-react';
 import { analyzeInvoice } from './services/geminiService';
 import { enhanceImageForOCR } from './src/lib/imageEnhancement';
-import { InvoiceData, AppStatus, InvoiceEntry, Project, ERPRecord, ProjectMeta, ProcessingState, AuditRow } from './types';
+import { InvoiceData, ProjectMeta } from './types';
 import InvoiceEditor from './components/InvoiceEditor';
 import ErrorReviewPage from './components/ErrorReviewPage';
 import CostDashboard from './components/CostDashboard';
+import AuditTable from './components/AuditTable';
 import * as Lucide from 'lucide-react';
 import * as XLSX from 'xlsx';
-import UTIF from 'utif';
+import { useProject } from './src/hooks/useProject';
+import { useOCRBatch } from './src/hooks/useOCRBatch';
 
 declare global {
     interface AIStudio {
@@ -30,14 +32,34 @@ const BUYER_TAX_ID_REQUIRED = "16547744";
 
 const App: React.FC = () => {
     const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB'>('PROJECT_LIST');
-    const [projectList, setProjectList] = useState<ProjectMeta[]>([]);
-    const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
-    const [progress, setProgress] = useState<ProcessingState>({ current: 0, total: 0, status: 'IDLE' });
-    const [project, setProject] = useState<Project | null>(null);
+    const {
+        projectList,
+        project,
+        createProject,
+        loadProject: loadProjectFromHook,
+        deleteProject: deleteProjectFromHook,
+        updateInvoices,
+        updateERP,
+        toggleErpFlag,
+        updateProjectMeta,
+        setProject,
+    } = useProject();
+
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);
     const selectedModel = 'gemini-3-flash-preview-hybrid';
-    const [batchStats, setBatchStats] = useState({ startTime: 0, endTime: 0, totalDuration: 0 });
+
+    const {
+        progress,
+        batchStats,
+        cancelProcessingRef,
+        handleFiles,
+        fileInputRef,
+    } = useOCRBatch({
+        project,
+        selectedModel,
+        updateProjectInvoices: updateInvoices,
+    });
 
     const [isCreating, setIsCreating] = useState(false);
     const [createYear, setCreateYear] = useState(new Date().getFullYear());
@@ -55,45 +77,13 @@ const App: React.FC = () => {
     const [newSellerName, setNewSellerName] = useState('');
     const [newSellerTaxId, setNewSellerTaxId] = useState('');
 
-    const fileInputRef = useRef<HTMLInputElement>(null);
     const erpInputRef = useRef<HTMLInputElement>(null);
-    const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const isDirtyRef = useRef(false);
-    const latestProjectRef = useRef<Project | null>(null);
-    const cancelProcessingRef = useRef(false); // Used to instantly halt background async requests
 
-    // Keep ref in sync
+    // Cleanup old files on startup
     useEffect(() => {
-        latestProjectRef.current = project;
-        if (project) {
-            isDirtyRef.current = true;
-        }
-    }, [project]);
-
-    // Cleanup old files on startup & Setup Auto-Save
-    useEffect(() => {
-        // Prune files older than 30 days (extended from 24h)
         fileStorageService.pruneOldFiles(30 * 24 * 60 * 60 * 1000).then(count => {
             if (count > 0) console.log(`Cleaned up ${count} old temporary files`);
         });
-
-        // Auto-save interval (10 seconds)
-        const interval = setInterval(() => {
-            if (isDirtyRef.current && latestProjectRef.current) {
-                saveProjectSnapshot(latestProjectRef.current);
-                isDirtyRef.current = false;
-            }
-        }, 10000);
-
-        return () => clearInterval(interval);
-    }, []);
-
-    // Load project list on startup
-    useEffect(() => {
-        const storedList = localStorage.getItem('project_list');
-        if (storedList) {
-            setProjectList(JSON.parse(storedList));
-        }
 
         // Check API Key
         const checkKey = async () => {
@@ -102,115 +92,20 @@ const App: React.FC = () => {
         checkKey();
     }, []);
 
-
-
     // --- Project Management Functions ---
-
-    const saveProjectSnapshot = (proj: Project) => {
-        console.log('Auto-saving project...', new Date().toISOString());
-        // 1. Save specific project data (Images excluded implicitly by JSON.stringify of File objects)
-        const serializableProject = {
-            ...proj,
-            updatedAt: new Date().toISOString(),
-            invoices: proj.invoices.map(inv => ({
-                ...inv,
-                file: { name: inv.file.name, type: inv.file.type }, // Only keep metadata
-                previewUrl: '', // Clear blob URLs
-            })),
-        };
-        localStorage.setItem(`project_${proj.id}`, JSON.stringify(serializableProject));
-
-        // 2. Update Metadata List
-        setProjectList(prev => {
-            const newList = prev.filter(p => p.id !== proj.id);
-            const meta: ProjectMeta = {
-                id: proj.id,
-                name: proj.name,
-                updatedAt: new Date().toISOString(),
-                invoiceCount: proj.invoices.length,
-                erpCount: proj.erpData.length,
-                year: proj.year,
-                month: proj.month
-            };
-            const updatedList = [meta, ...newList];
-            localStorage.setItem('project_list', JSON.stringify(updatedList));
-            return updatedList;
-        });
-    };
 
     const confirmCreateProject = () => {
         const name = `${createYear}-${String(createMonth).padStart(2, '0')}月 進項發票`;
-
-        const newProj: Project = {
-            id: `proj_${Date.now()}`,
-            name: name,
-            invoices: [],
-            erpData: [],
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            year: createYear,
-            month: createMonth,
-        };
-
-        const newMeta: ProjectMeta = {
-            id: newProj.id,
-            name: newProj.name,
-            updatedAt: newProj.updatedAt,
-            invoiceCount: 0,
-            erpCount: 0,
-            year: createYear,
-            month: createMonth,
-        };
-
-        setProject(newProj);
-        setProject(newProj);
-        saveProjectSnapshot(newProj);
-        setProjectList([...projectList, newMeta]);
-        localStorage.setItem('project_list', JSON.stringify([...projectList, newMeta]));
+        createProject(name, createYear, createMonth);
         setView('WORKSPACE');
         setIsCreating(false);
     };
 
-    const loadProject = (id: string) => {
-        const data = localStorage.getItem(`project_${id}`);
-        if (data) {
-            const loaded: Project = JSON.parse(data);
-            // Rehydrate File objects (mock files, real content needs re-upload)
-            loaded.invoices = loaded.invoices.map((inv: any) => ({
-                ...inv,
-                status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status, // Reset stuck items from mid-batch refresh
-                file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }),
-                previewUrl: '' // Empty until re-uploaded
-            }));
-            setProject(loaded);
-
-            // Async rehydrate DB files
-            const rehydrateImages = async () => {
-                const updatedInvoices = await Promise.all(loaded.invoices.map(async (inv: any) => {
-                    try {
-                        const dbFile = await fileStorageService.getFile(inv.id);
-                        if (dbFile) {
-                            return {
-                                ...inv,
-                                file: dbFile,
-                                previewUrl: URL.createObjectURL(dbFile)
-                            };
-                        }
-                    } catch (err: any) {
-                        logger.error('FILE', `IndexedDB Load Failed for ${inv.id}`, err);
-                        alert(`讀取圖片或PDF失敗 (${inv.id}): ${err?.name || 'Error'} - ${err?.message || '未知儲存空間錯誤。建議檢查儲存空間或隱私權設定。'}`);
-                    }
-                    return {
-                        ...inv,
-                        file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }),
-                        previewUrl: ''
-                    };
-                }));
-                // Silent update to avoid triggering full re-render loop issues
-                setProject(prev => prev ? { ...prev, invoices: updatedInvoices } : null);
-            };
-            rehydrateImages();
-
+    const loadProject = async (id: string) => {
+        const ok = await loadProjectFromHook(id, (invId, err) => {
+            alert(`讀取圖片或PDF失敗 (${invId}): ${err?.name || 'Error'} - ${err?.message || '未知儲存空間錯誤。建議檢查儲存空間或隱私權設定。'}`);
+        });
+        if (ok) {
             setView('WORKSPACE');
         } else {
             alert("讀取專案失敗");
@@ -220,11 +115,7 @@ const App: React.FC = () => {
     const deleteProject = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         if (!confirm("確定要刪除此專案嗎？所有資料將無法復原。")) return;
-
-        localStorage.removeItem(`project_${id}`);
-        const newList = projectList.filter(p => p.id !== id);
-        setProjectList(newList);
-        localStorage.setItem('project_list', JSON.stringify(newList));
+        deleteProjectFromHook(id);
     };
 
     const startEditingProject = (p: ProjectMeta, e?: React.MouseEvent) => {
@@ -237,22 +128,7 @@ const App: React.FC = () => {
 
     const saveProjectEdit = () => {
         if (!editingProjectId || !editName.trim()) return;
-
-        const updated = projectList.map(p =>
-            p.id === editingProjectId
-                ? { ...p, name: editName, year: editYear, month: editMonth }
-                : p
-        );
-        setProjectList(updated);
-        localStorage.setItem('project_list', JSON.stringify(updated));
-
-        // Update loaded project if it's the one being edited
-        if (project?.id === editingProjectId) {
-            const updatedProject = { ...project, name: editName, year: editYear, month: editMonth };
-            setProject(updatedProject);
-            saveProjectSnapshot(updatedProject);
-        }
-
+        updateProjectMeta(editingProjectId, editName, editYear, editMonth);
         setEditingProjectId(null);
     };
 
@@ -278,37 +154,6 @@ const App: React.FC = () => {
         setSellerRows(prev => prev.filter(r => r.id !== id));
     };
 
-    const updateProjectInvoices = (updater: (prevInvoices: InvoiceEntry[]) => InvoiceEntry[]) => {
-        setProject(prev => {
-            if (!prev) return null;
-            return { ...prev, invoices: updater(prev.invoices) };
-        });
-        // Note: We removed immediate saveCurrentProject call. It is now handled by the 10s interval.
-    };
-
-    const updateProjectERP = (records: ERPRecord[]) => {
-        setProject(prev => {
-            if (!prev) return null;
-            const updated = { ...prev, erpData: records };
-            setTimeout(() => saveProjectSnapshot(updated), 100);
-            return updated;
-        });
-    };
-
-    const toggleErpFlag = (voucherId: string, invoiceNumbers: string[]) => {
-        setProject(prev => {
-            if (!prev) return null;
-            return {
-                ...prev,
-                erpData: prev.erpData.map(erp => {
-                    const isMatch = erp.voucher_id === voucherId &&
-                        erp.invoice_numbers.join(',') === invoiceNumbers.join(',');
-                    return isMatch ? { ...erp, erpFlagged: !erp.erpFlagged } : erp;
-                })
-            };
-        });
-    };
-
     const toggleErpDiscrepancy = (voucherId: string) => {
         setProject(prev => {
             if (!prev) return null;
@@ -329,15 +174,14 @@ const App: React.FC = () => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        setStatus(AppStatus.PROCESSING);
         const reader = new FileReader();
         reader.onload = (event) => {
             const data = event.target?.result;
-            if (!data) { setStatus(AppStatus.IDLE); return; }
+            if (!data) { return; }
 
             let workbook;
             try { workbook = XLSX.read(data, { type: 'array' }); } catch (error) {
-                alert("無法解析檔案"); setStatus(AppStatus.IDLE); return;
+                alert("無法解析檔案"); return;
             }
 
             const firstSheetName = workbook.SheetNames[0];
@@ -347,7 +191,7 @@ const App: React.FC = () => {
             const parsedRecords = parseERPRows(rows);
 
             if (parsedRecords.length > 0) {
-                updateProjectERP(parsedRecords);
+                updateERP(parsedRecords);
                 // Sync sellers to Supabase in background
                 const sellersFromERP: Record<string, string> = {};
                 parsedRecords.forEach(r => {
@@ -362,351 +206,11 @@ const App: React.FC = () => {
             } else {
                 alert("無法解析檔案內容。");
             }
-            setStatus(AppStatus.IDLE);
             if (erpInputRef.current) erpInputRef.current.value = '';
         };
         reader.readAsArrayBuffer(file);
     };
 
-    // Smart Upload with Deduplication, Concurrency, and Batch Updates
-    const handleFiles = async (files: FileList | File[]) => {
-        if (!project) return;
-
-        const fileArray = Array.from(files);
-        if (fileArray.length === 0) return;
-
-        setStatus(AppStatus.PROCESSING);
-        cancelProcessingRef.current = false; // Reset lock on start
-
-        // Reset metrics for new batch
-        const batchStart = Date.now();
-        setBatchStats({ startTime: batchStart, endTime: 0, totalDuration: 0 });
-
-        const newProcessQueue: InvoiceEntry[] = [];
-
-        // 1. Calculate new invoice list synchronously
-        const currentInvoices = project.invoices;
-        const existingMap = new Map(currentInvoices.map(p => [p.id, p]));
-
-        // Track seen invoice numbers for duplicate detection
-        const seenInvoiceNumbers = new Set<string>();
-        currentInvoices.forEach(inv => inv.data.forEach(d => {
-            if (d.invoice_number) seenInvoiceNumbers.add(d.invoice_number.replace(/[\s-]/g, '').toUpperCase());
-        }));
-
-        // Helper: Convert ALL pages of a TIF to one tall PNG (pages stacked vertically)
-        const convertTifToPng = async (file: File): Promise<File> => {
-            const buffer = await file.arrayBuffer();
-            const ifds = UTIF.decode(buffer);
-
-            // Decode all pages
-            ifds.forEach((ifd: any) => UTIF.decodeImage(buffer, ifd));
-
-            // Stitch all pages vertically onto one canvas
-            const totalWidth = Math.max(...ifds.map((p: any) => p.width as number));
-            const totalHeight = ifds.reduce((sum: number, p: any) => sum + (p.height as number), 0);
-
-            const canvas = document.createElement('canvas');
-            canvas.width = totalWidth;
-            canvas.height = totalHeight;
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error("Could not get canvas context");
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, totalWidth, totalHeight);
-
-            let yOffset = 0;
-            for (const page of ifds) {
-                const rgba = UTIF.toRGBA8(page);
-                const imgData = new ImageData(new Uint8ClampedArray(rgba.buffer), page.width, page.height);
-                const offscreen = document.createElement('canvas');
-                offscreen.width = page.width;
-                offscreen.height = page.height;
-                offscreen.getContext('2d')!.putImageData(imgData, 0, 0);
-                ctx.drawImage(offscreen, 0, yOffset);
-                yOffset += page.height;
-            }
-
-            return new Promise((resolve) => {
-                canvas.toBlob((blob) => {
-                    if (!blob) throw new Error("Canvas toBlob failed");
-                    resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".png", { type: "image/png" }));
-                }, 'image/png');
-            });
-        };
-
-        let nextInvoices = [...currentInvoices];
-
-        // Threshold for performance: only generate previews automatically if batch size < 800
-        const shouldGeneratePreview = fileArray.length < 800;
-        if (!shouldGeneratePreview) {
-            logger.warn('SYSTEM', `Batch size (${fileArray.length}) is large. Auto-previews disabled to save memory.`);
-        }
-
-        for (const file of fileArray) {
-            if (cancelProcessingRef.current) break; // Stop if cancelled
-            let processedFile = file;
-            const isTif = file.name.toLowerCase().endsWith('.tif') || file.name.toLowerCase().endsWith('.tiff');
-
-            if (isTif) {
-                try {
-                    logger.info('IMAGE', `Converting TIF to PNG: ${file.name}`);
-                    processedFile = await convertTifToPng(file);
-                } catch (err) {
-                    logger.error('IMAGE', `Failed to convert TIF: ${file.name}`, err);
-                }
-            }
-
-            // Enhance image for OCR (contrast/brightness normalization for faint/blurry documents)
-            try {
-                logger.info('IMAGE', `Enhancing for OCR: ${processedFile.name}`);
-                processedFile = await enhanceImageForOCR(processedFile);
-            } catch (err) {
-                logger.warn('IMAGE', `Image enhancement failed (using original): ${processedFile.name}`, err);
-                // Continue with original file if enhancement fails
-            }
-
-            const filename = processedFile.name;
-            let id = filename.substring(0, filename.lastIndexOf('.')) || filename;
-
-            // Disambiguate: if same base-name ID already taken by a DIFFERENT file (e.g. G61-Q10001.pdf vs G61-Q10001.jpg),
-            // append the extension so both get processed and prefix-matched to the same ERP row.
-            if (existingMap.has(id) || nextInvoices.some(n => n.id === id && n.file.name !== processedFile.name)) {
-                const existing = existingMap.get(id) || nextInvoices.find(n => n.id === id);
-                if (existing && existing.file.name !== processedFile.name) {
-                    const ext = filename.split('.').pop()?.toLowerCase() || '';
-                    id = `${id}-${ext}`;
-                }
-            }
-
-            // Sanitize ID: Remove any spaces or special characters that might cause IDB issues in some environments
-            const sanitizedId = id.replace(/[^\w-]/g, '_');
-
-            // Save to IndexedDB - CRITICAL: Must AWAIT to prevent race conditions on Edge
-            try {
-                await fileStorageService.saveFile(sanitizedId, processedFile);
-            } catch (err: any) {
-                logger.error('FILE', `IndexedDB Save Failed for ${sanitizedId}`, err);
-                alert(`儲存檔案至瀏覽器失敗 (${sanitizedId}): ${err?.name || 'Error'} - ${err?.message || '未知儲存空間錯誤。您的磁碟可能已滿，或是處於無痕模式。'}`);
-                // We proceed but it might show 'missing file' later if rehydrated
-            }
-
-            const previewUrl = shouldGeneratePreview ? URL.createObjectURL(processedFile) : '';
-
-            if (existingMap.has(sanitizedId) || nextInvoices.some(n => n.id === sanitizedId)) {
-                const existing = existingMap.get(sanitizedId) || nextInvoices.find(n => n.id === sanitizedId)!;
-
-                if (existing.status === 'SUCCESS' && existing.data.length > 0) {
-                    const entry: InvoiceEntry = {
-                        ...existing,
-                        file: processedFile,
-                        previewUrl: previewUrl,
-                        status: 'SUCCESS'
-                    };
-                    nextInvoices = nextInvoices.map(inv => inv.id === sanitizedId ? entry : inv);
-                } else {
-                    const entry: InvoiceEntry = { id: sanitizedId, file: processedFile, previewUrl, status: 'PENDING', data: [] };
-                    nextInvoices = nextInvoices.map(inv => inv.id === sanitizedId ? entry : inv);
-                    newProcessQueue.push(entry);
-                }
-            } else {
-                const entry: InvoiceEntry = { id: sanitizedId, file: processedFile, previewUrl, status: 'PENDING', data: [] };
-                nextInvoices.push(entry);
-                newProcessQueue.push(entry);
-            }
-        }
-
-        // If processing was cancelled during file preparation, stop here
-        if (cancelProcessingRef.current) {
-            setStatus(AppStatus.IDLE);
-            setProgress({ current: 0, total: 0, status: 'IDLE' });
-            if (fileInputRef.current) fileInputRef.current.value = '';
-            return;
-        }
-
-        // Update list to show "PENDING" state
-        updateProjectInvoices(() => nextInvoices);
-
-        // If nothing to process (all duplicates), finish early
-        if (newProcessQueue.length === 0) {
-            setStatus(AppStatus.IDLE);
-            alert("所有檔案皆已處理過。若需重新辨識，請先刪除舊資料。");
-            if (fileInputRef.current) fileInputRef.current.value = '';
-            return;
-        }
-
-        // --- Concurrency & Batch Update Logic ---
-
-        // Initialize Progress
-        const totalItems = newProcessQueue.length;
-        logger.info('QUEUE', `Batch started with ${totalItems} new items using model: ${selectedModel}`, { fileNames: newProcessQueue.map(i => i.id) });
-        setProgress({ current: 0, total: totalItems, status: 'PROCESSING' });
-
-        // --- START BATCH PROCESS ---
-        const CONCURRENCY_LIMIT = 5; // Increased from 2 to 5 for better throughput without hitting 429 too fast
-        const changesMap = new Map<string, Partial<InvoiceEntry>>();
-
-        // Start the batch updater interval
-        const flushInterval = setInterval(() => {
-            if (changesMap.size > 0) {
-                // CRITICAL FIX: Snapshot the map immediately!
-                // We cannot read from 'changesMap' inside the setState callback because
-                // changesMap.clear() runs synchronously below, wiping it before React updates.
-                const changesSnapshot = new Map(changesMap);
-                changesMap.clear();
-
-                updateProjectInvoices(prev => prev.map(inv => {
-                    const change = changesSnapshot.get(inv.id);
-                    return change ? { ...inv, ...change } : inv;
-                }));
-            }
-        }, 500);
-
-        let completedCount = 0;
-
-        // Generate Seller Map from ERP Data for AI Enrichment
-        const knownSellersFromExcel: Record<string, string> = {};
-        if (project && project.erpData) {
-            project.erpData.forEach(erp => {
-                // Format: { "Vendor Name": "TaxID" }
-                // Only add if both exist and TaxID is valid (digits)
-                // Clean up name by removing common suffixes if needed, but 'includes' logic in service handles partials.
-                if (erp.seller_name && erp.seller_tax_id && /^\d{8}$/.test(erp.seller_tax_id.trim())) {
-                    knownSellersFromExcel[erp.seller_name.trim()] = erp.seller_tax_id.trim();
-                }
-            });
-            logger.info('QUEUE', `Generated ${Object.keys(knownSellersFromExcel).length} seller mappings from Excel.`);
-        }
-
-        // Worker function for the concurrency pool
-        const processItem = async (item: InvoiceEntry) => {
-            if (cancelProcessingRef.current) return; // Stop if cancelled
-
-            // Mark as processing in our batch map
-            changesMap.set(item.id, { status: 'PROCESSING' });
-            logger.info('QUEUE', `Processing item: ${item.id}`);
-
-            try {
-                // Step 1: Preprocess image for better OCR accuracy
-                let processedFile = item.file;
-                if (item.file.type.startsWith('image/')) {
-                    try {
-                        processedFile = await preprocessImageForOCR(item.file, {
-                            sharpen: true,
-                            increaseContrast: true,
-                            grayscale: false // Keep color for now
-                        });
-                        logger.info('PREPROCESSING', `Enhanced image: ${item.id}`);
-                    } catch (err) {
-                        logger.warn('PREPROCESSING', `Failed to preprocess ${item.id}, using original`, err);
-                    }
-                }
-
-                const base64 = await fileToBase64(processedFile);
-                // Log start time for this specific item
-                const startTime = Date.now();
-
-                // Find matching ERP record for cross-validation
-                let expectedERP = undefined;
-                if (project && project.erpData) {
-                    const matchingErp = project.erpData.find(erp =>
-                        item.id === erp.voucher_id || item.id.startsWith(erp.voucher_id + '-') || item.id.startsWith(erp.voucher_id + '_')
-                    );
-                    if (matchingErp) {
-                        expectedERP = {
-                            amount_total: matchingErp.amount_total,
-                            amount_sales: matchingErp.amount_sales,
-                            amount_tax: matchingErp.amount_tax,
-                            invoice_numbers: matchingErp.invoice_numbers
-                        };
-                    }
-                }
-
-                // Pass the Excel-derived seller map to the AI service
-                const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellersFromExcel, expectedERP);
-
-                if (results && results.length > 0) {
-
-                    // Duplicate Check Logic
-                    results.forEach(res => {
-                        const normNo = (res.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
-                        if (normNo) {
-                            if (seenInvoiceNumbers.has(normNo)) {
-                                res.trace_logs = res.trace_logs || [];
-                                res.trace_logs.push(`[System Warning] Duplicate Invoice Number Detected: ${res.invoice_number}`);
-                                // We can also flag it if there is a verification status field
-                                // res.verification.logic_is_valid = false; // Optional?
-                            } else {
-                                seenInvoiceNumbers.add(normNo);
-                            }
-                        }
-                    });
-
-                    const duration = Date.now() - startTime;
-                    logger.info('API', `Success: ${item.id}`, { duration, invoiceCount: results.length });
-                    changesMap.set(item.id, { status: 'SUCCESS', data: results });
-                } else {
-                    logger.warn('API', `Empty Result: ${item.id}`, { duration: Date.now() - startTime });
-                    changesMap.set(item.id, { status: 'ERROR', error: '無法辨識發票內容', data: [] });
-                }
-            } catch (err: any) {
-                const errorMsg = err?.message?.includes('429') ? 'API 額度已滿' : (err.message || '辨識失敗');
-                logger.error('API', `Failed: ${item.id}`, { error: errorMsg, details: err });
-                changesMap.set(item.id, { status: 'ERROR', error: errorMsg, data: [] });
-            } finally {
-                completedCount++;
-                setProgress({ current: completedCount, total: totalItems, status: 'PROCESSING' });
-            }
-        };
-
-        // Simple Concurrency Pool Loop
-        const pool: Promise<void>[] = [];
-        const queue = [...newProcessQueue];
-
-        // We use a simple recurrent function to process the queue
-        const processNext = async () => {
-            if (cancelProcessingRef.current) return; // INSTANT ABORT
-            if (queue.length === 0) return;
-            const item = queue.shift();
-            if (item) {
-                await processItem(item);
-
-                // 強制延遲 0.5 秒，稍微稀釋 API 請求頻率即可
-                await new Promise(resolve => setTimeout(resolve, 500));
-
-                // After finishing one, try to pick up another
-                if (queue.length > 0 && !cancelProcessingRef.current) await processNext();
-            }
-        };
-
-        // Start initial batch
-        const initialBatch = Array(Math.min(CONCURRENCY_LIMIT, queue.length)).fill(null).map(() => processNext());
-        await Promise.all(initialBatch);
-
-        // Clean up
-        clearInterval(flushInterval);
-
-        // Final flush if any remains
-        if (changesMap.size > 0) {
-            updateProjectInvoices(prev => prev.map(inv => {
-                const change = changesMap.get(inv.id);
-                return change ? { ...inv, ...change } : inv;
-            }));
-        }
-
-        const batchEnd = Date.now();
-        setBatchStats({ startTime: batchStart, endTime: batchEnd, totalDuration: batchEnd - batchStart });
-
-        setStatus(AppStatus.IDLE);
-        setProgress({ current: completedCount, total: totalItems, status: 'COMPLETED' });
-        logger.info('QUEUE', `Batch completed. Processed ${completedCount}/${totalItems} items.`);
-
-        // Reset progress after a delay
-        setTimeout(() => {
-            setProgress(p => ({ ...p, status: 'IDLE' }));
-        }, 3000);
-
-        if (fileInputRef.current) fileInputRef.current.value = '';
-    };
 
     const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -716,7 +220,7 @@ const App: React.FC = () => {
     });
 
     const handleSave = (id: string, updatedData: InvoiceData) => {
-        updateProjectInvoices(prev => prev.map(inv => {
+        updateInvoices(prev => prev.map(inv => {
             if (inv.id === id) {
                 const newData = [...inv.data];
                 if (newData.length > 0) newData[0] = updatedData;
@@ -729,7 +233,7 @@ const App: React.FC = () => {
     };
 
     const handleDeleteOCR = (id: string) => {
-        updateProjectInvoices(prev => prev.map(inv =>
+        updateInvoices(prev => prev.map(inv =>
             inv.id === id
                 ? { ...inv, data: [], status: 'PENDING' as const, previewUrl: '' }
                 : inv
@@ -744,12 +248,10 @@ const App: React.FC = () => {
             return;
         }
 
-        updateProjectInvoices(prev => prev.map(inv =>
+        updateInvoices(prev => prev.map(inv =>
             inv.id === id ? { ...inv, status: 'PENDING' as const, data: [], error: undefined } : inv
         ));
         setSelectedKey(null);
-        setStatus(AppStatus.PROCESSING);
-        setProgress({ current: 0, total: 1, status: 'PROCESSING' });
 
         try {
             let processedFile = entry.file;
@@ -784,20 +286,16 @@ const App: React.FC = () => {
             }
 
             const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellers, expectedERP);
-            updateProjectInvoices(prev => prev.map(inv =>
+            updateInvoices(prev => prev.map(inv =>
                 inv.id === id
                     ? { ...inv, status: results.length > 0 ? 'SUCCESS' as const : 'ERROR' as const, data: results, error: results.length > 0 ? undefined : '無法辨識發票內容' }
                     : inv
             ));
         } catch (err: any) {
             const msg = err?.message?.includes('429') ? 'API 額度已滿，請稍後再試' : (err?.message || '辨識失敗');
-            updateProjectInvoices(prev => prev.map(inv =>
+            updateInvoices(prev => prev.map(inv =>
                 inv.id === id ? { ...inv, status: 'ERROR' as const, error: msg } : inv
             ));
-        } finally {
-            setStatus(AppStatus.IDLE);
-            setProgress({ current: 1, total: 1, status: 'COMPLETED' });
-            setTimeout(() => setProgress(p => ({ ...p, status: 'IDLE' })), 3000);
         }
     };
 
@@ -1193,8 +691,6 @@ const App: React.FC = () => {
                                 <button
                                     onClick={() => {
                                         cancelProcessingRef.current = true;
-                                        setProgress(p => ({ ...p, status: 'IDLE' }));
-                                        setStatus(AppStatus.IDLE);
                                     }}
                                     className="px-2 py-0.5 bg-white border border-rose-200 text-rose-500 rounded text-[10px] font-bold hover:bg-rose-50 flex items-center gap-1 shadow-sm transition-colors"
                                 >
@@ -1218,197 +714,14 @@ const App: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden flex flex-col flex-1">
-                        <div className="overflow-auto custom-scrollbar flex-1">
-                            <table className="w-full text-left border-collapse relative">
-                                <thead className="sticky top-0 z-20 shadow-sm text-[11px]">
-                                    <tr className="font-black uppercase tracking-widest text-center sticky top-0 z-20">
-                                        <th className="bg-slate-100 py-2 border-b border-r border-gray-200 w-[42%] text-slate-700 shadow-sm" colSpan={8}>ERP 帳務資料</th>
-                                        <th className="bg-gray-50 py-2 border-b border-r border-gray-200 w-[6%] text-gray-500 shadow-sm">狀態</th>
-                                        <th className="bg-indigo-50 py-2 border-b border-gray-200 w-[52%] text-indigo-700 shadow-sm" colSpan={8}>OCR 辨識結果</th>
-                                    </tr>
-                                    <tr className="bg-white border-b border-gray-100 text-gray-400 sticky top-[33px] z-20 shadow-sm">
-                                        <th className="pl-4 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">傳票編號</th>
-                                        <th className="px-1 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">發票日期</th>
-                                        <th className="px-1 py-2 font-bold text-slate-500 bg-slate-50/90 backdrop-blur">發票號碼</th>
-                                        <th className="px-1 py-2 font-bold text-slate-400 bg-slate-50/90 backdrop-blur">稅別</th>
-                                        <th className="px-1 py-2 text-right bg-slate-50/90 backdrop-blur">銷售額合計</th>
-                                        <th className="px-1 py-2 text-right bg-slate-50/90 backdrop-blur">營業稅</th>
-                                        <th className="px-1 py-2 text-right font-bold text-slate-600 bg-slate-50/90 backdrop-blur">總計</th>
-                                        <th className="px-1 py-2 text-center border-r bg-slate-50/90 backdrop-blur">統編</th>
-                                        <th className="px-1 py-2 text-center border-r bg-white/90 backdrop-blur">比對</th>
-                                        <th className="pl-4 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">發票日期</th>
-                                        <th className="px-1 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">OCR 發票號</th>
-                                        <th className="px-1 py-2 text-indigo-400 bg-indigo-50/90 backdrop-blur">稅別</th>
-                                        <th className="px-1 py-2 text-right text-indigo-300 bg-indigo-50/90 backdrop-blur">銷售額合計</th>
-                                        <th className="px-1 py-2 text-right text-indigo-300 bg-indigo-50/90 backdrop-blur">營業稅</th>
-                                        <th className="px-1 py-2 text-right font-bold text-indigo-500 bg-indigo-50/90 backdrop-blur">總計</th>
-                                        <th className="px-1 py-2 text-center text-indigo-300 bg-indigo-50/90 backdrop-blur">賣方統編</th>
-                                        <th className="px-1 py-2 text-right pr-4 bg-indigo-50/90 backdrop-blur">功能</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-50 text-[13px]">
-                                    {auditList.map((row) => {
-                                        const isMismatch = row.auditStatus === 'MISMATCH';
-                                        let isMissing = row.auditStatus === 'MISSING_FILE';
-                                        const isMatch = row.auditStatus === 'MATCH';
-                                        const isSkipped = row.auditStatus === 'SKIPPED';
-                                        const isPending = row.file?.status === 'PENDING';
-                                        const hasOcrButNoFile = row.file && !row.file.previewUrl && row.file.status === 'SUCCESS';
-
-                                        // Override missing visual flag if it's just PENDING
-                                        if (isPending) isMissing = false;
-                                        const isInvoiceRow = row.ocr?.voucher_type === 'Invoice' || row.ocr?.document_type === 'Invoice' || row.ocr?.document_type === 'Commercial Invoice';
-
-                                        return (
-                                            <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending && !isInvoiceRow ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${isSkipped ? 'bg-gray-100/30' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
-                                                <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing || isPending ? 'text-slate-400' : 'text-slate-700'}`}>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span>{row.id}</span>
-                                                        {row.erp && (
-                                                            <button
-                                                                title={row.erp.erpFlagged ? 'ERP 已標注待確認，點擊取消' : '標注此 ERP 資料待確認'}
-                                                                onClick={() => toggleErpFlag(row.erp!.voucher_id, row.erp!.invoice_numbers)}
-                                                                className={`opacity-0 group-hover:opacity-100 transition-opacity text-xs px-1 rounded ${row.erp.erpFlagged ? 'opacity-100 text-amber-600 bg-amber-100' : 'text-gray-400 hover:text-amber-500'}`}
-                                                            >🚩</button>
-                                                        )}
-                                                        {row.erp?.erpFlagged && <span className="text-[9px] text-amber-700 font-bold bg-amber-100 px-1 rounded">ERP 待確認</span>}
-                                                    </div>
-                                                </td>
-                                                <td className="px-1 py-3 font-mono text-slate-400">
-                                                    {row.erp?.invoice_date || '-'}
-                                                </td>
-                                                <td className={`px-1 py-3 font-mono ${!isInvoiceRow && row.diffDetails.includes('inv_no') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-400' : 'text-slate-600')}`}>
-                                                    {row.erp?.invoice_numbers.length ? (
-                                                        <div className="flex flex-col">
-                                                            {row.erp.invoice_numbers.map((num, i) => <span key={i}>{num}</span>)}
-                                                        </div>
-                                                    ) : '-'}
-                                                </td>
-                                                <td className="px-1 py-3 text-center font-mono">
-                                                    {row.erp?.tax_code ? (
-                                                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">{row.erp.tax_code}</span>
-                                                    ) : '-'}
-                                                </td>
-                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp ? row.erp.amount_sales.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp ? row.erp.amount_tax.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-right font-mono font-bold ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : (isMissing ? 'text-slate-400' : 'text-slate-800')}`}>{row.erp ? row.erp.amount_total.toLocaleString() : '-'}</td>
-                                                <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${!isInvoiceRow && row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
-                                                <td className="px-1 py-3 text-center border-r border-gray-100 align-middle">
-                                                    <div className="flex flex-col items-center gap-1">
-                                                        {isPending && <><Lucide.Clock className="w-4 h-4 text-amber-500" /><span className="text-[9px] text-amber-600 font-bold mt-0.5">待解析</span></>}
-                                                        {!isPending && isInvoiceRow && <CheckCircle2 className="w-5 h-5 text-slate-300" />}
-                                                        {!isPending && !isInvoiceRow && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                                                        {!isPending && !isInvoiceRow && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
-                                                        {!isPending && isSkipped && <><CheckCircle2 className="w-5 h-5 text-slate-400" /><span className="text-[9px] text-slate-500 font-bold mt-0.5">已跳過</span></>}
-                                                        {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
-                                                        
-                                                        {!isMissing && (row.ocr?.voucher_type || row.ocr?.document_type) && (
-                                                            <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded leading-none text-center whitespace-nowrap ${
-                                                                row.ocr?.voucher_type === '三聯手寫' ? 'bg-amber-100 text-amber-800' :
-                                                                row.ocr?.voucher_type === '三聯收銀' ? 'bg-blue-100 text-blue-700' :
-                                                                row.ocr?.voucher_type === '三聯電子' ? 'bg-indigo-100 text-indigo-700' :
-                                                                row.ocr?.voucher_type === '二聯收銀' ? 'bg-purple-100 text-purple-700' :
-                                                                row.ocr?.voucher_type === '收據' ? 'bg-gray-100 text-gray-600' :
-                                                                row.ocr?.voucher_type === '車票' ? 'bg-green-100 text-green-700' :
-                                                                row.ocr?.voucher_type === 'Invoice' ? 'bg-rose-100 text-rose-700' :
-                                                                row.ocr?.document_type === '進口報單' || (row.ocr?.document_type || '').includes('海關') ? 'bg-teal-100 text-teal-700' :
-                                                                'bg-gray-100 text-gray-500'
-                                                            }`} title={row.ocr?.voucher_type || row.ocr?.document_type}>
-                                                                {row.ocr?.voucher_type || (row.ocr?.document_type && row.ocr.document_type.length > 6 ? row.ocr.document_type.substring(0, 5) + '..' : row.ocr?.document_type)}
-                                                            </span>
-                                                        )}
-
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('date') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">日期不符</span>}
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('amount') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">金額不符</span>}
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('inv_no') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">發票號碼不符</span>}
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('tax_code') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">稅別不符</span>}
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('tax_id') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">統編不符</span>}
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('tax_id_unclear') && <span className="text-[9px] text-amber-600 font-bold bg-amber-100 px-1 rounded">統編模糊</span>}
-                                                        {isMismatch && !isInvoiceRow && row.diffDetails.includes('no_match_found') && <span className="text-[9px] text-rose-600 font-bold bg-rose-100 px-1 rounded">找不到對應</span>}
-                                                    </div>
-                                                </td>
-                                                <td className="pl-4 py-3 font-mono text-indigo-900 flex items-center gap-2 cursor-pointer" onClick={() => setSelectedKey(row.key)}>
-                                                    {isSkipped ? (
-                                                        <span className="text-gray-400 italic">-</span>
-                                                    ) : row.file ? (
-                                                        <>
-                                                            {row.file.status === 'PROCESSING' ? <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" /> : (hasOcrButNoFile ? <FileSearch className="w-3.5 h-3.5 text-amber-400" /> : <FileText className="w-3.5 h-3.5 text-indigo-300" />)}
-                                                            {isPending ? (
-                                                                <>
-                                                                    <span className="text-gray-400 italic">-</span>
-                                                                    <button
-                                                                        onClick={(e) => { e.stopPropagation(); handleFiles([row.file!.file]); }}
-                                                                        className="ml-1 p-1 rounded text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-                                                                        title="重新上傳憑證並辨識"
-                                                                    >
-                                                                        <UploadCloud className="w-3.5 h-3.5" />
-                                                                    </button>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <span className={`${!row.ocr ? 'text-gray-400 italic' : ''}`}>
-                                                                        {row.ocr?.invoice_date ? <span className={`text-xs mr-1 px-1 py-0.5 rounded ${row.diffDetails.includes('date') ? 'text-rose-600 font-bold bg-rose-100 border border-rose-300' : 'text-indigo-300'}`}>{row.ocr.invoice_date}</span> : null}
-                                                                        {row.ocr?.error_code === 'BLURRY' ? <span className="text-rose-500 font-bold flex items-center gap-1"><Lucide.EyeOff className="w-3 h-3" /> 影像模糊</span> :
-                                                                                (row.ocr?.invoice_number || (row.file.status === 'PROCESSING' ? '...' :
-                                                                                    (row.file.status === 'ERROR' ? <span className="text-rose-500 font-bold" title={row.file.error}>{row.file.error || '辨識失敗'}</span> :
-                                                                                        (hasOcrButNoFile ? '需補上傳' : '未對應'))))}
-                                                                    </span>
-                                                                    {hasOcrButNoFile && <span className="text-[9px] text-amber-600 bg-amber-50 px-1 rounded">資料已存/缺圖</span>}
-                                                                </>
-                                                            )}
-                                                        </>
-                                                    ) : <span className="text-gray-300 text-xs italic">等待上傳...</span>}
-                                                </td>
-                                                <td className="px-1 py-3 text-center font-mono">
-                                                    {row.ocr?.tax_code ? (
-                                                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
-                                                            row.ocr.tax_code === 'T300' ? 'bg-amber-100 text-amber-700' :
-                                                            row.ocr.tax_code === 'T301' ? 'bg-indigo-100 text-indigo-700' :
-                                                            row.ocr.tax_code === 'T302' ? 'bg-blue-100 text-blue-700' :
-                                                            row.ocr.tax_code === 'T400' ? 'bg-teal-100 text-teal-700' :
-                                                            row.ocr.tax_code === 'T500' ? 'bg-purple-100 text-purple-700' :
-                                                            'bg-gray-100 text-gray-500'
-                                                        } ${!isInvoiceRow && row.diffDetails.includes('tax_code') ? 'ring-2 ring-rose-500' : ''}`}>{row.ocr.tax_code}</span>
-                                                    ) : '-'}
-                                                </td>
-                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-400'}`}>
-                                                    {row.ocr ? (
-                                                        <span className="flex items-center justify-end gap-1">
-                                                            {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-400 font-sans tracking-wide">{row.ocr.currency}</span>}
-                                                            {row.ocr.amount_sales.toLocaleString()}
-                                                        </span>
-                                                    ) : '-'}
-                                                </td>
-                                                <td className={`px-1 py-3 text-right font-mono ${!isInvoiceRow && row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-400'}`}>
-                                                    {row.ocr ? (
-                                                        <span className="flex items-center justify-end gap-1">
-                                                            {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-400 font-sans tracking-wide">{row.ocr.currency}</span>}
-                                                            {row.ocr.amount_tax.toLocaleString()}
-                                                        </span>
-                                                    ) : '-'}
-                                                </td>
-                                                <td className={`px-1 py-3 text-right font-mono font-bold ${row.diffDetails.includes('amount') ? 'text-rose-600' : 'text-indigo-700'}`}>
-                                                    {row.ocr ? (
-                                                        <span className="flex items-center justify-end gap-1">
-                                                            {row.ocr.currency && row.ocr.currency !== 'TWD' && <span className="text-[9px] text-gray-500 font-sans tracking-wide">{row.ocr.currency}</span>}
-                                                            {row.ocr.amount_total.toLocaleString()}
-                                                        </span>
-                                                    ) : '-'}
-                                                </td>
-                                                <td className={`px-1 py-3 text-center font-mono ${row.ocr?.seller_tax_id?.includes('?') ? 'text-amber-500 font-bold' : (row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : 'text-indigo-400')}`}>{row.ocr?.seller_tax_id || '-'}</td>
-                                                <td className="px-1 py-3 text-right pr-4">
-                                                    {(row.file?.status === 'SUCCESS' || row.ocr) && (
-                                                        <div className="flex justify-end gap-1"><button className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded" onClick={() => setSelectedKey(row.key)}><Edit3 className="w-3.5 h-3.5" /></button></div>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+                    <AuditTable
+                        auditList={auditList}
+                        selectedKey={selectedKey}
+                        onRowClick={setSelectedKey}
+                        onReprocess={(file) => handleFiles([file])}
+                        onToggleErpFlag={toggleErpFlag}
+                        project={project}
+                    />
                 )
                 }
             </main >
