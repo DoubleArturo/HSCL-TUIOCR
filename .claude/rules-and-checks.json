@@ -1,0 +1,132 @@
+{
+  "version": "1.0",
+  "last_updated": "2026-05-26",
+  "metadata": {
+    "description": "Automated rule checklist for auditLogic and OCR pipeline",
+    "purpose": "Prevent common logic errors during development"
+  },
+  "critical_rules": [
+    {
+      "id": "RULE_001",
+      "severity": "CRITICAL",
+      "title": "claimedOCRInvNos must use Set, not Array",
+      "description": "Prevents duplicate invoice calculation in multi-row same-voucher_id case",
+      "files": ["src/lib/auditLogic.ts"],
+      "line_ranges": [[85, 121]],
+      "bad_pattern": "claimedOCRInvNos: string[]|Record<string,boolean>",
+      "good_pattern": "claimedOCRInvNos: Set<string>",
+      "test_file": "src/lib/auditLogic.test.ts",
+      "test_lines": [229, 276],
+      "related_decision": "design-decisions.md#1"
+    },
+    {
+      "id": "RULE_002",
+      "severity": "CRITICAL",
+      "title": "T500 ERP row must skip amount diff completely",
+      "description": "T500 tax_code has special amount accounting, skip comparison entirely",
+      "files": ["src/lib/auditLogic.ts"],
+      "line_ranges": [[129, 134], [176, 181]],
+      "checkpoints": [
+        "If erp.tax_code === 'T500', erpIsBusOrRailTicket = true",
+        "If erpIsBusOrRailTicket, never add 'amount' to diffDetails",
+        "Fallback comparison also checks erpIsBusOrRailTicket"
+      ],
+      "bad_pattern": "if (erp.tax_code === 'T500') { /* allow amount comparison */ }",
+      "test_file": "src/lib/auditLogic.test.ts",
+      "test_lines": [195, 226],
+      "related_decision": "design-decisions.md#2"
+    },
+    {
+      "id": "RULE_003",
+      "severity": "CRITICAL",
+      "title": "isCountableForAmount is the only invoice filter for amount comparison",
+      "description": "All amount calculations must use this function to exclude TXXX and non-invoice types",
+      "files": ["src/lib/auditLogic.ts"],
+      "line_ranges": [[10, 12], [128, 130], [170, 172]],
+      "bad_pattern": "if (inv.tax_code !== 'TXXX') { /* count amount */ }",
+      "good_pattern": "validOCRForAmount = matchedOCRInvoices.filter(isCountableForAmount)",
+      "test_file": "src/lib/auditLogic.test.ts",
+      "test_lines": [141, 193],
+      "related_decision": "design-decisions.md#3"
+    },
+    {
+      "id": "RULE_004",
+      "severity": "CRITICAL",
+      "title": "shouldSkipFromAudit and ERP TXXX skip must be in sync",
+      "description": "If OCR can skip (shouldSkipFromAudit=true), ERP must also skip (auditStatus=SKIPPED)",
+      "files": ["src/lib/auditLogic.ts"],
+      "line_ranges": [[24, 36], [95, 99]],
+      "checkpoints": [
+        "When modifying shouldSkipFromAudit, check ERP layer skip at line 95-99",
+        "If new skip condition added to shouldSkipFromAudit, add corresponding ERP skip",
+        "Test must verify both layers skip together"
+      ],
+      "test_file": "src/lib/auditLogic.test.ts",
+      "test_lines": [363, 387],
+      "related_decision": "design-decisions.md#5"
+    },
+    {
+      "id": "RULE_005",
+      "severity": "CRITICAL",
+      "title": "Buyer tax_id '16547744' never written to Supabase",
+      "description": "Own buyer tax ID would pollute seller database. Must filter before upsert.",
+      "files": ["src/services/supabaseService.ts"],
+      "pattern_to_add": "if (buyerTaxId === '16547744') return; // skip upsert",
+      "validation": "Check if filter exists in upsertSeller()",
+      "related_decision": "design-decisions.md#4, known-bugs.md#7"
+    }
+  ],
+  "important_rules": [
+    {
+      "id": "RULE_006",
+      "severity": "IMPORTANT",
+      "title": "normInvoiceNumber() must be called before any comparison",
+      "description": "ERP invoice_numbers may contain spaces, mixed case, hyphens",
+      "files": ["src/lib/auditLogic.ts"],
+      "line_ranges": [[70, 73], [97, 98]],
+      "bad_pattern": "erpInvNos = erp.invoice_numbers",
+      "good_pattern": "erpInvNos = erp.invoice_numbers.map(normInvNo)"
+    },
+    {
+      "id": "RULE_007",
+      "severity": "IMPORTANT",
+      "title": "Gemini deduplication requires 3-step order: non-invoice → ghost → duplicate",
+      "description": "Cannot reorder or skip steps; will cause duplicates",
+      "files": ["services/geminiService.ts"],
+      "line_ranges": [[420, 470]],
+      "steps": [
+        "Step 1: Filter out non-invoice pages (packing list, delivery note keywords)",
+        "Step 2: Remove ghost duplicates (same amount ±5, no invoice_number)",
+        "Step 3: Remove exact duplicates (same invoice_number)"
+      ],
+      "test_file": "services/geminiService.ts",
+      "related_decision": "design-decisions.md#6"
+    },
+    {
+      "id": "RULE_008",
+      "severity": "IMPORTANT",
+      "title": "Image enhancement gamma value locked at 0.75 for low-contrast",
+      "description": "Changing gamma to 0.8 or higher will over-sharpen clear images",
+      "files": ["src/lib/imageEnhancement.ts"],
+      "line_ranges": [[30, 60]],
+      "constraint": "gamma = 0.75 for range < 100, 0.9 for range >= 100",
+      "validation": "Test on faint ink documents (XW17220651) before change",
+      "related_decision": "design-decisions.md#6, known-bugs.md#1"
+    }
+  ],
+  "validation_checklist": {
+    "before_commit": [
+      "Run: npm test (must 100% pass)",
+      "Check: Did I modify auditLogic.ts or geminiService.ts?",
+      "If yes: Update version stamp in CLAUDE-ocr-business-logic.md",
+      "Check: Did I add new tax_code or voucher_type?",
+      "If yes: Update CLAUDE-ocr-business-logic.md + add test case",
+      "Review: Does this change violate any CRITICAL_RULES above?"
+    ],
+    "after_merge": [
+      "Monitor: Amount mismatch rate should not spike > 2x",
+      "Log: Any edge cases discovered, add to known-bugs.md",
+      "Update: design-decisions.md if design rationale changed"
+    ]
+  }
+}

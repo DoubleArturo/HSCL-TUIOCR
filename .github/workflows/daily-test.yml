@@ -4,6 +4,8 @@ on:
   schedule:
     # 每天 UTC 01:00 = 台灣時間 09:00
     - cron: '0 1 * * *'
+    # 每週一 UTC 01:00 = 台灣時間 09:00 — Golden Test Sample 完整驗證
+    - cron: '0 1 * * 1'
   push:
     branches: [main]
   pull_request:
@@ -25,8 +27,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
+      - name: Run all tests
         run: npm test -- --reporter=verbose
+
+      - name: Run Golden Test Sample verification
+        if: github.event.schedule == '0 1 * * 1'
+        run: |
+          npm test -- golden-test-sample --reporter=verbose
+          echo "✅ Golden Test Sample verified"
 
       - name: Summarize results
         if: always()
@@ -34,3 +42,6 @@ jobs:
           echo "## Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "Ran on: $(date -u '+%Y-%m-%d %H:%M UTC') (台灣時間 +8h)" >> $GITHUB_STEP_SUMMARY
           echo "Branch: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ github.event.schedule }}" == "0 1 * * 1" ]]; then
+            echo "🧪 Golden Test Sample verification completed" >> $GITHUB_STEP_SUMMARY
+          fi

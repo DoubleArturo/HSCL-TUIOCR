@@ -1,0 +1,816 @@
+{
+  "G61-Q40001": [
+    {
+      "voucher_id": "G61-Q40001",
+      "tax_code": "TXXX",
+      "vendor_name": "NBS",
+      "vendor_tax_id": null,
+      "currency": "USD",
+      "invoice_date": "2026/03/24",
+      "invoice_numbers": [
+        "P02-P90156"
+      ],
+      "amount_sales": 663058,
+      "amount_tax": 0,
+      "amount_total": 663058,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40002": [
+    {
+      "voucher_id": "G61-Q40002",
+      "tax_code": "T302",
+      "vendor_name": "協昌",
+      "vendor_tax_id": "12546771",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XW22600505"
+      ],
+      "amount_sales": 104800,
+      "amount_tax": 5240,
+      "amount_total": 110040,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40003": [
+    {
+      "voucher_id": "G61-Q40003",
+      "tax_code": "T301",
+      "vendor_name": "廣翰",
+      "vendor_tax_id": "22280997",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "YX51222396"
+      ],
+      "amount_sales": 117104,
+      "amount_tax": 5855,
+      "amount_total": 122959,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40003",
+      "tax_code": "T301",
+      "vendor_name": "廣翰",
+      "vendor_tax_id": "22280997",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "YX51222397"
+      ],
+      "amount_sales": 99584,
+      "amount_tax": 4979,
+      "amount_total": 104563,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40004": [
+    {
+      "voucher_id": "G61-Q40004",
+      "tax_code": "T301",
+      "vendor_name": "品固企業",
+      "vendor_tax_id": "20928581",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "YX47512924"
+      ],
+      "amount_sales": 2400,
+      "amount_tax": 120,
+      "amount_total": 2520,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40004",
+      "tax_code": "T301",
+      "vendor_name": "品固企業",
+      "vendor_tax_id": "20928581",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "YX47513102"
+      ],
+      "amount_sales": 2000,
+      "amount_tax": 100,
+      "amount_total": 2100,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40005": [
+    {
+      "voucher_id": "G61-Q40005",
+      "tax_code": "T300",
+      "vendor_name": "金永盛",
+      "vendor_tax_id": "84183171",
+      "currency": "NTD",
+      "invoice_date": "2026/03/31",
+      "invoice_numbers": [
+        "XV08080459"
+      ],
+      "amount_sales": 350,
+      "amount_tax": 18,
+      "amount_total": 368,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40006": [
+    {
+      "voucher_id": "G61-Q40006",
+      "tax_code": "T300",
+      "vendor_name": "欣西格林",
+      "vendor_tax_id": "80092966",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XV22236600"
+      ],
+      "amount_sales": 11400,
+      "amount_tax": 570,
+      "amount_total": 11970,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40007": [
+    {
+      "voucher_id": "G61-Q40007",
+      "tax_code": "T300",
+      "vendor_name": "泉勝",
+      "vendor_tax_id": "56635027",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XV22332802"
+      ],
+      "amount_sales": 144800,
+      "amount_tax": 7240,
+      "amount_total": 152040,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40008": [
+    {
+      "voucher_id": "G61-Q40008",
+      "tax_code": "T300",
+      "vendor_name": "登祥",
+      "vendor_tax_id": "04301746",
+      "currency": "NTD",
+      "invoice_date": "2026/03/31",
+      "invoice_numbers": [
+        "XV50097765"
+      ],
+      "amount_sales": 189040,
+      "amount_tax": 9452,
+      "amount_total": 198492,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40009": [
+    {
+      "voucher_id": "G61-Q40009",
+      "tax_code": "T300",
+      "vendor_name": "金展達企業",
+      "vendor_tax_id": "28779487",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XV48531366"
+      ],
+      "amount_sales": 78080,
+      "amount_tax": 3904,
+      "amount_total": 81984,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40010": [
+    {
+      "voucher_id": "G61-Q40010",
+      "tax_code": "T300",
+      "vendor_name": "森振",
+      "vendor_tax_id": "97332997",
+      "currency": "NTD",
+      "invoice_date": "2026/03/25",
+      "invoice_numbers": [
+        "XV37730672"
+      ],
+      "amount_sales": 93298,
+      "amount_tax": 4665,
+      "amount_total": 97963,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40010",
+      "tax_code": "T300",
+      "vendor_name": "森振",
+      "vendor_tax_id": "97332997",
+      "currency": "NTD",
+      "invoice_date": "2026/03/25",
+      "invoice_numbers": [
+        "XV37730673"
+      ],
+      "amount_sales": 101600,
+      "amount_tax": 5080,
+      "amount_total": 106680,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40010",
+      "tax_code": "T300",
+      "vendor_name": "森振",
+      "vendor_tax_id": "97332997",
+      "currency": "NTD",
+      "invoice_date": "2026/03/25",
+      "invoice_numbers": [
+        "XV37730675"
+      ],
+      "amount_sales": 3000,
+      "amount_tax": 150,
+      "amount_total": 3150,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40011": [
+    {
+      "voucher_id": "G61-Q40011",
+      "tax_code": "T300",
+      "vendor_name": "國帥",
+      "vendor_tax_id": "22804805",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XV18729752"
+      ],
+      "amount_sales": 231660,
+      "amount_tax": 11583,
+      "amount_total": 243243,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40012": [
+    {
+      "voucher_id": "G61-Q40012",
+      "tax_code": "T300",
+      "vendor_name": "勝群",
+      "vendor_tax_id": "28391491",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "XV44523008"
+      ],
+      "amount_sales": 192014,
+      "amount_tax": 9601,
+      "amount_total": 201615,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40013": [
+    {
+      "voucher_id": "G61-Q40013",
+      "tax_code": "T300",
+      "vendor_name": "丞崎",
+      "vendor_tax_id": "70413139",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XV33205808"
+      ],
+      "amount_sales": 12100,
+      "amount_tax": 605,
+      "amount_total": 12705,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40013",
+      "tax_code": "T300",
+      "vendor_name": "丞崎",
+      "vendor_tax_id": "70413139",
+      "currency": "NTD",
+      "invoice_date": "2026/04/01",
+      "invoice_numbers": [
+        "XV33205809"
+      ],
+      "amount_sales": 45000,
+      "amount_tax": 2250,
+      "amount_total": 47250,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40014": [
+    {
+      "voucher_id": "G61-Q40014",
+      "tax_code": "T301",
+      "vendor_name": "祥興鋼鐵",
+      "vendor_tax_id": "35836619",
+      "currency": "NTD",
+      "invoice_date": "2026/03/31",
+      "invoice_numbers": [
+        "YD41735162"
+      ],
+      "amount_sales": 81953,
+      "amount_tax": 4098,
+      "amount_total": 86051,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40015": [
+    {
+      "voucher_id": "G61-Q40015",
+      "tax_code": "T300",
+      "vendor_name": "德星",
+      "vendor_tax_id": "66328147",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "XV43555917"
+      ],
+      "amount_sales": 27494,
+      "amount_tax": 1375,
+      "amount_total": 28869,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40016": [
+    {
+      "voucher_id": "G61-Q40016",
+      "tax_code": "T301",
+      "vendor_name": "榮星",
+      "vendor_tax_id": "86249493",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "ZG48340049"
+      ],
+      "amount_sales": 14978,
+      "amount_tax": 749,
+      "amount_total": 15727,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40016",
+      "tax_code": "T301",
+      "vendor_name": "榮星",
+      "vendor_tax_id": "86249493",
+      "currency": "NTD",
+      "invoice_date": "2026/04/02",
+      "invoice_numbers": [
+        "ZG48340115"
+      ],
+      "amount_sales": 41156,
+      "amount_tax": 2058,
+      "amount_total": 43214,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40017": [
+    {
+      "voucher_id": "G61-Q40017",
+      "tax_code": "T300",
+      "vendor_name": "永峻",
+      "vendor_tax_id": "84539026",
+      "currency": "NTD",
+      "invoice_date": "2026/03/27",
+      "invoice_numbers": [
+        "XV10074912"
+      ],
+      "amount_sales": 107090,
+      "amount_tax": 5355,
+      "amount_total": 112445,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40017",
+      "tax_code": "T300",
+      "vendor_name": "永峻",
+      "vendor_tax_id": "84539026",
+      "currency": "NTD",
+      "invoice_date": "2026/03/27",
+      "invoice_numbers": [
+        "XV10074913"
+      ],
+      "amount_sales": 11760,
+      "amount_tax": 588,
+      "amount_total": 12348,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40017",
+      "tax_code": "T300",
+      "vendor_name": "永峻",
+      "vendor_tax_id": "84539026",
+      "currency": "NTD",
+      "invoice_date": "2026/03/27",
+      "invoice_numbers": [
+        "XV10074914"
+      ],
+      "amount_sales": 13340,
+      "amount_tax": 667,
+      "amount_total": 14007,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40017",
+      "tax_code": "T300",
+      "vendor_name": "永峻",
+      "vendor_tax_id": "84539026",
+      "currency": "NTD",
+      "invoice_date": "2026/03/27",
+      "invoice_numbers": [
+        "XV10074915"
+      ],
+      "amount_sales": 12640,
+      "amount_tax": 632,
+      "amount_total": 13272,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40018": [
+    {
+      "voucher_id": "G61-Q40018",
+      "tax_code": "T300",
+      "vendor_name": "英翔",
+      "vendor_tax_id": "53961890",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "XV45224184"
+      ],
+      "amount_sales": 9400,
+      "amount_tax": 470,
+      "amount_total": 9870,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40018",
+      "tax_code": "T300",
+      "vendor_name": "英翔",
+      "vendor_tax_id": "53961890",
+      "currency": "NTD",
+      "invoice_date": "2026/04/02",
+      "invoice_numbers": [
+        "XV45224187"
+      ],
+      "amount_sales": 10000,
+      "amount_tax": 500,
+      "amount_total": 10500,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40018",
+      "tax_code": "T300",
+      "vendor_name": "英翔",
+      "vendor_tax_id": "53961890",
+      "currency": "NTD",
+      "invoice_date": "2026/04/02",
+      "invoice_numbers": [
+        "XV45224188"
+      ],
+      "amount_sales": 1634,
+      "amount_tax": 82,
+      "amount_total": 1716,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40018",
+      "tax_code": "T300",
+      "vendor_name": "英翔",
+      "vendor_tax_id": "53961890",
+      "currency": "NTD",
+      "invoice_date": "2026/04/07",
+      "invoice_numbers": [
+        "XV45224190"
+      ],
+      "amount_sales": 1601,
+      "amount_tax": 80,
+      "amount_total": 1681,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40018",
+      "tax_code": "T300",
+      "vendor_name": "英翔",
+      "vendor_tax_id": "53961890",
+      "currency": "NTD",
+      "invoice_date": "2026/04/07",
+      "invoice_numbers": [
+        "XV45224191"
+      ],
+      "amount_sales": 2325,
+      "amount_tax": 116,
+      "amount_total": 2441,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40018",
+      "tax_code": "T300",
+      "vendor_name": "英翔",
+      "vendor_tax_id": "53961890",
+      "currency": "NTD",
+      "invoice_date": "2026/04/07",
+      "invoice_numbers": [
+        "XV45224192"
+      ],
+      "amount_sales": 109300,
+      "amount_tax": 5465,
+      "amount_total": 114765,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40019": [
+    {
+      "voucher_id": "G61-Q40019",
+      "tax_code": "T300",
+      "vendor_name": "政泰(連諭)",
+      "vendor_tax_id": "29128266",
+      "currency": "NTD",
+      "invoice_date": "2026/03/04",
+      "invoice_numbers": [
+        "XV45842803"
+      ],
+      "amount_sales": 48970,
+      "amount_tax": 2449,
+      "amount_total": 51419,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40020": [
+    {
+      "voucher_id": "G61-Q40020",
+      "tax_code": "TXXX",
+      "vendor_name": "創先(立先)",
+      "vendor_tax_id": "16839849",
+      "currency": "USD",
+      "invoice_date": "2026/03/27",
+      "invoice_numbers": [
+        "P02-PC0206"
+      ],
+      "amount_sales": 9111,
+      "amount_tax": 0,
+      "amount_total": 9111,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40021": [
+    {
+      "voucher_id": "G61-Q40021",
+      "tax_code": "T301",
+      "vendor_name": "康揚",
+      "vendor_tax_id": "22604412",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "ZE09689841"
+      ],
+      "amount_sales": 6750,
+      "amount_tax": 338,
+      "amount_total": 7088,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40022": [
+    {
+      "voucher_id": "G61-Q40022",
+      "tax_code": "T301",
+      "vendor_name": "台灣華傑",
+      "vendor_tax_id": "23373585",
+      "currency": "NTD",
+      "invoice_date": "2026/03/26",
+      "invoice_numbers": [
+        "YL82777674"
+      ],
+      "amount_sales": 1800,
+      "amount_tax": 90,
+      "amount_total": 1890,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40023": [
+    {
+      "voucher_id": "G61-Q40023",
+      "tax_code": "T300",
+      "vendor_name": "繼德",
+      "vendor_tax_id": "23457064",
+      "currency": "NTD",
+      "invoice_date": "2026/03/26",
+      "invoice_numbers": [
+        "XV51157831"
+      ],
+      "amount_sales": 32280,
+      "amount_tax": 1614,
+      "amount_total": 33894,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40024": [
+    {
+      "voucher_id": "G61-Q40024",
+      "tax_code": "T301",
+      "vendor_name": "發明家",
+      "vendor_tax_id": "22859168",
+      "currency": "NTD",
+      "invoice_date": "2026/03/27",
+      "invoice_numbers": [
+        "YX98689323"
+      ],
+      "amount_sales": 19600,
+      "amount_tax": 980,
+      "amount_total": 20580,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40025": [
+    {
+      "voucher_id": "G61-Q40025",
+      "tax_code": "T301",
+      "vendor_name": "安富利",
+      "vendor_tax_id": "16846270",
+      "currency": "USD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "YX37721441"
+      ],
+      "amount_sales": 14569,
+      "amount_tax": 729,
+      "amount_total": 15298,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40025",
+      "tax_code": "T301",
+      "vendor_name": "安富利",
+      "vendor_tax_id": "16846270",
+      "currency": "USD",
+      "invoice_date": "2026/03/31",
+      "invoice_numbers": [
+        "YX37721975"
+      ],
+      "amount_sales": 17927,
+      "amount_tax": 896,
+      "amount_total": 18823,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40026": [
+    {
+      "voucher_id": "G61-Q40026",
+      "tax_code": "T301",
+      "vendor_name": "亨新",
+      "vendor_tax_id": "89493718",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "ZC24208853"
+      ],
+      "amount_sales": 54644,
+      "amount_tax": 2732,
+      "amount_total": 57376,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40026",
+      "tax_code": "T301",
+      "vendor_name": "亨新",
+      "vendor_tax_id": "89493718",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "ZC24208854"
+      ],
+      "amount_sales": 4298,
+      "amount_tax": 215,
+      "amount_total": 4513,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40027": [
+    {
+      "voucher_id": "G61-Q40027",
+      "tax_code": "T301",
+      "vendor_name": "凱媛",
+      "vendor_tax_id": "27338364",
+      "currency": "NTD",
+      "invoice_date": "2026/03/26",
+      "invoice_numbers": [
+        "YY62923464"
+      ],
+      "amount_sales": 11956,
+      "amount_tax": 598,
+      "amount_total": 12554,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40027",
+      "tax_code": "T301",
+      "vendor_name": "凱媛",
+      "vendor_tax_id": "27338364",
+      "currency": "NTD",
+      "invoice_date": "2026/03/26",
+      "invoice_numbers": [
+        "YY62923465"
+      ],
+      "amount_sales": 45348,
+      "amount_tax": 2267,
+      "amount_total": 47615,
+      "period": "202604"
+    },
+    {
+      "voucher_id": "G61-Q40027",
+      "tax_code": "T301",
+      "vendor_name": "凱媛",
+      "vendor_tax_id": "27338364",
+      "currency": "NTD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "YY62923476"
+      ],
+      "amount_sales": 1256,
+      "amount_tax": 63,
+      "amount_total": 1319,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40028": [
+    {
+      "voucher_id": "G61-Q40028",
+      "tax_code": "T301",
+      "vendor_name": "嶄富",
+      "vendor_tax_id": "05008163",
+      "currency": "NTD",
+      "invoice_date": "2026/03/26",
+      "invoice_numbers": [
+        "YD35110031"
+      ],
+      "amount_sales": 5860,
+      "amount_tax": 293,
+      "amount_total": 6153,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40029": [
+    {
+      "voucher_id": "G61-Q40029",
+      "tax_code": "T300",
+      "vendor_name": "思維芯科技",
+      "vendor_tax_id": "28910162",
+      "currency": "NTD",
+      "invoice_date": "2026/03/25",
+      "invoice_numbers": [
+        "XV39760803"
+      ],
+      "amount_sales": 1136000,
+      "amount_tax": 56800,
+      "amount_total": 1192800,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40030": [
+    {
+      "voucher_id": "G61-Q40030",
+      "tax_code": "T300",
+      "vendor_name": "速碼波科技",
+      "vendor_tax_id": "28746732",
+      "currency": "USD",
+      "invoice_date": "2026/03/25",
+      "invoice_numbers": [
+        "XV42595356"
+      ],
+      "amount_sales": 114732,
+      "amount_tax": 5737,
+      "amount_total": 120469,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40031": [
+    {
+      "voucher_id": "G61-Q40031",
+      "tax_code": "T300",
+      "vendor_name": "旭世科技",
+      "vendor_tax_id": "25046030",
+      "currency": "USD",
+      "invoice_date": "2026/03/30",
+      "invoice_numbers": [
+        "XV53855502"
+      ],
+      "amount_sales": 1826724,
+      "amount_tax": 91336,
+      "amount_total": 1918060,
+      "period": "202604"
+    }
+  ],
+  "G61-Q40032": [
+    {
+      "voucher_id": "G61-Q40032",
+      "tax_code": "T301",
+      "vendor_name": "邑昇實業",
+      "vendor_tax_id": "84808400",
+      "currency": "NTD",
+      "invoice_date": "2026/03/26",
+      "invoice_numbers": [
+        "ZB90003984"
+      ],
+      "amount_sales": 39900,
+      "amount_tax": 1995,
+      "amount_total": 41895,
+      "period": "202604"
+    }
+  ]
+}

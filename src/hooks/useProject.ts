@@ -51,6 +51,8 @@ export function useProject() {
         updatedAt: new Date().toISOString(),
         invoiceCount: proj.invoices.length,
         erpCount: proj.erpData.length,
+        year: proj.year,
+        month: proj.month,
       };
       const updated = [meta, ...prev.filter(p => p.id !== proj.id)];
       localStorage.setItem('project_list', JSON.stringify(updated));
@@ -58,7 +60,7 @@ export function useProject() {
     });
   }, []);
 
-  const createProject = useCallback((name: string) => {
+  const createProject = useCallback((name: string, year?: number, month?: number) => {
     const newProj: Project = {
       id: `proj_${Date.now()}`,
       name,
@@ -66,13 +68,18 @@ export function useProject() {
       erpData: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      year,
+      month,
     };
     setProject(newProj);
     saveSnapshot(newProj);
     return newProj;
   }, [saveSnapshot]);
 
-  const loadProject = useCallback(async (id: string): Promise<boolean> => {
+  const loadProject = useCallback(async (
+    id: string,
+    onError?: (invId: string, err: any) => void,
+  ): Promise<boolean> => {
     const data = localStorage.getItem(`project_${id}`);
     if (!data) return false;
 
@@ -92,12 +99,27 @@ export function useProject() {
         if (dbFile) return { ...inv, file: dbFile, previewUrl: URL.createObjectURL(dbFile) };
       } catch (err: any) {
         logger.error('FILE', `IndexedDB Load Failed for ${inv.id}`, err);
+        onError?.(inv.id, err);
       }
       return { ...inv, file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }), previewUrl: '' };
     }));
     setProject(prev => prev ? { ...prev, invoices: updated } : null);
     return true;
   }, []);
+
+  const updateProjectMeta = useCallback((id: string, name: string, year: number, month: number) => {
+    setProjectList(prev => {
+      const updated = prev.map(p => p.id === id ? { ...p, name, year, month } : p);
+      localStorage.setItem('project_list', JSON.stringify(updated));
+      return updated;
+    });
+    setProject(prev => {
+      if (!prev || prev.id !== id) return prev;
+      const updatedProj = { ...prev, name, year, month };
+      setTimeout(() => saveSnapshot(updatedProj), 0);
+      return updatedProj;
+    });
+  }, [saveSnapshot]);
 
   const deleteProject = useCallback((id: string) => {
     localStorage.removeItem(`project_${id}`);
@@ -145,5 +167,6 @@ export function useProject() {
     updateInvoices,
     updateERP,
     toggleErpFlag,
+    updateProjectMeta,
   };
 }

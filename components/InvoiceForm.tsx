@@ -211,7 +211,7 @@ const InvoiceForm: React.FC<Props> = ({
                     >
                         <Lucide.CheckCheck className="w-3.5 h-3.5" /> 視覺確認無誤
                     </button>
-                    {onReOCR && (
+                    {onReOCR && auditStatus !== 'SKIPPED' && (
                         <button
                             onClick={() => { if (window.confirm('確定要重新辨識？現有 OCR 結果將被覆蓋。')) onReOCR(); }}
                             className="p-1.5 hover:bg-blue-50 rounded-full text-blue-400 hover:text-blue-600 transition-colors"
