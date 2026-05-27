@@ -553,7 +553,7 @@ export const analyzeInvoice = async (
         },
       });
 
-      if (error) throw new Error(`Proxy error: ${error.message}`);
+      if (error) throw new Error(`Proxy error: ${error.message} | context: ${error.context?.message ?? ''} | status: ${(error as any).status ?? ''}`);
       text = data?.text ?? null;
       if (data?.usageMetadata) {
         const usage = data.usageMetadata;
