@@ -2,6 +2,16 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Project, ProjectMeta, InvoiceEntry, ERPRecord } from '../../types';
 import { fileStorageService } from '../../services/fileStorageService';
 import { logger } from '../../services/loggerService';
+import {
+  fetchProjectList,
+  fetchFullProject,
+  upsertProject,
+  upsertInvoiceEntries,
+  upsertErpRecords,
+  deleteProject as cloudDeleteProject,
+} from '../../services/cloudSyncService';
+
+// ─── localStorage helpers (cache only) ───────────────────────────────────────
 
 function serializeProject(proj: Project): object {
   return {
@@ -15,8 +25,34 @@ function serializeProject(proj: Project): object {
   };
 }
 
+function cacheWrite(proj: Project) {
+  try {
+    localStorage.setItem(`project_${proj.id}`, JSON.stringify(serializeProject(proj)));
+  } catch { /* quota exceeded — cache write is best-effort */ }
+}
+
+function cacheRead(id: string): Project | null {
+  try {
+    const raw = localStorage.getItem(`project_${id}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function cacheWriteList(list: ProjectMeta[]) {
+  try { localStorage.setItem('project_list', JSON.stringify(list)); } catch { /* best-effort */ }
+}
+
+function cacheReadList(): ProjectMeta[] {
+  try {
+    const raw = localStorage.getItem('project_list');
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
 export function useProject() {
-  const [projectList, setProjectList] = useState<ProjectMeta[]>([]);
+  const [projectList, setProjectList] = useState<ProjectMeta[]>(() => cacheReadList());
   const [project, setProject] = useState<Project | null>(null);
 
   const isDirtyRef = useRef(false);
@@ -27,23 +63,57 @@ export function useProject() {
     if (project) isDirtyRef.current = true;
   }, [project]);
 
-  // Load project list + setup auto-save
+  // Startup: load list from Supabase (cache shown instantly while fetching)
   useEffect(() => {
-    const stored = localStorage.getItem('project_list');
-    if (stored) setProjectList(JSON.parse(stored));
+    fetchProjectList().then(list => {
+      if (list.length > 0) {
+        setProjectList(list);
+        cacheWriteList(list);
+      }
+    });
 
+    // Auto-save dirty state every 10s
     const interval = setInterval(() => {
       if (isDirtyRef.current && latestProjectRef.current) {
-        saveSnapshot(latestProjectRef.current);
+        syncProject(latestProjectRef.current);
         isDirtyRef.current = false;
       }
     }, 10000);
-    return () => clearInterval(interval);
+
+    // Force-save when tab is hidden (handles Chrome Memory Saver / tab switching)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isDirtyRef.current && latestProjectRef.current) {
+        syncProject(latestProjectRef.current);
+        isDirtyRef.current = false;
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
-  const saveSnapshot = useCallback((proj: Project) => {
-    const serializable = serializeProject(proj);
-    localStorage.setItem(`project_${proj.id}`, JSON.stringify(serializable));
+  // ─── Cloud sync ────────────────────────────────────────────────────────────
+
+  const syncProject = useCallback(async (proj: Project) => {
+    cacheWrite(proj);
+    await upsertProject(proj);
+    await Promise.all([
+      upsertInvoiceEntries(proj.id, proj.invoices),
+      upsertErpRecords(proj.id, proj.erpData),
+    ]);
+    // Refresh project list counts in background
+    fetchProjectList().then(list => {
+      setProjectList(list);
+      cacheWriteList(list);
+    });
+  }, []);
+
+  // ─── Project list metadata update helper ──────────────────────────────────
+
+  const refreshListMeta = useCallback((proj: Project) => {
     setProjectList(prev => {
       const meta: ProjectMeta = {
         id: proj.id,
@@ -55,10 +125,27 @@ export function useProject() {
         month: proj.month,
       };
       const updated = [meta, ...prev.filter(p => p.id !== proj.id)];
-      localStorage.setItem('project_list', JSON.stringify(updated));
+      cacheWriteList(updated);
       return updated;
     });
   }, []);
+
+  // ─── Public API ────────────────────────────────────────────────────────────
+
+  const saveSnapshot = useCallback((proj: Project) => {
+    cacheWrite(proj);
+    refreshListMeta(proj);
+    upsertProject(proj);
+    upsertInvoiceEntries(proj.id, proj.invoices);
+    upsertErpRecords(proj.id, proj.erpData);
+  }, [refreshListMeta]);
+
+  const forceSave = useCallback(() => {
+    if (latestProjectRef.current) {
+      saveSnapshot(latestProjectRef.current);
+      isDirtyRef.current = false;
+    }
+  }, [saveSnapshot]);
 
   const createProject = useCallback((name: string, year?: number, month?: number) => {
     const newProj: Project = {
@@ -80,20 +167,41 @@ export function useProject() {
     id: string,
     onError?: (invId: string, err: any) => void,
   ): Promise<boolean> => {
-    const data = localStorage.getItem(`project_${id}`);
-    if (!data) return false;
+    // 1. Show cached version instantly if available
+    const cached = cacheRead(id);
+    if (cached) {
+      const preloaded: Project = {
+        ...cached,
+        invoices: cached.invoices.map((inv: any) => ({
+          ...inv,
+          status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status,
+          file: new File([], inv.file?.name || 'unknown', { type: inv.file?.type || 'image/jpeg' }),
+          previewUrl: '',
+        })),
+      };
+      setProject(preloaded);
+    }
 
-    const loaded: Project = JSON.parse(data);
-    loaded.invoices = loaded.invoices.map((inv: any) => ({
-      ...inv,
-      status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status,
-      file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }),
-      previewUrl: '',
-    }));
-    setProject(loaded);
+    // 2. Fetch from Supabase (authoritative)
+    const cloud = await fetchFullProject(id);
+    if (!cloud) {
+      // No cloud data: fall back to cache only
+      if (!cached) return false;
+    } else {
+      const loaded: Project = {
+        ...cloud,
+        invoices: cloud.invoices.map((inv: any) => ({
+          ...inv,
+          status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status,
+        })),
+      };
+      setProject(loaded);
+      cacheWrite(loaded);
+    }
 
-    // Async rehydrate images from IndexedDB
-    const updated = await Promise.all(loaded.invoices.map(async (inv: any) => {
+    // 3. Async rehydrate images from IndexedDB
+    const base = cloud ?? cached!;
+    const updated = await Promise.all(base.invoices.map(async (inv: any) => {
       try {
         const dbFile = await fileStorageService.getFile(inv.id);
         if (dbFile) return { ...inv, file: dbFile, previewUrl: URL.createObjectURL(dbFile) };
@@ -101,8 +209,13 @@ export function useProject() {
         logger.error('FILE', `IndexedDB Load Failed for ${inv.id}`, err);
         onError?.(inv.id, err);
       }
-      return { ...inv, file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }), previewUrl: '' };
+      return {
+        ...inv,
+        file: new File([], inv.file?.name || 'unknown', { type: inv.file?.type || 'image/jpeg' }),
+        previewUrl: '',
+      };
     }));
+
     setProject(prev => prev ? { ...prev, invoices: updated } : null);
     return true;
   }, []);
@@ -110,7 +223,7 @@ export function useProject() {
   const updateProjectMeta = useCallback((id: string, name: string, year: number, month: number) => {
     setProjectList(prev => {
       const updated = prev.map(p => p.id === id ? { ...p, name, year, month } : p);
-      localStorage.setItem('project_list', JSON.stringify(updated));
+      cacheWriteList(updated);
       return updated;
     });
     setProject(prev => {
@@ -122,12 +235,13 @@ export function useProject() {
   }, [saveSnapshot]);
 
   const deleteProject = useCallback((id: string) => {
-    localStorage.removeItem(`project_${id}`);
+    try { localStorage.removeItem(`project_${id}`); } catch { /* best-effort */ }
     setProjectList(prev => {
       const updated = prev.filter(p => p.id !== id);
-      localStorage.setItem('project_list', JSON.stringify(updated));
+      cacheWriteList(updated);
       return updated;
     });
+    cloudDeleteProject(id);
   }, []);
 
   const updateInvoices = useCallback((updater: (prev: InvoiceEntry[]) => InvoiceEntry[]) => {
@@ -161,6 +275,7 @@ export function useProject() {
     project,
     setProject,
     saveSnapshot,
+    forceSave,
     createProject,
     loadProject,
     deleteProject,
