@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Loader2, CheckCircle2, Edit3, Trash2, PlusSquare, ArrowLeftRight, UploadCloud, FolderOpen, ChevronRight, Calendar, Database, Search, Plus } from 'lucide-react';
+import { Loader2, CheckCircle2, Edit3, Trash2, PlusSquare, ArrowLeftRight, UploadCloud, FolderOpen, ChevronRight, Calendar, Database, Search, Plus, LogOut, Users } from 'lucide-react';
 import { analyzeInvoice } from './services/geminiService';
 import { enhanceImageForOCR } from './src/lib/imageEnhancement';
 import { InvoiceData, ProjectMeta } from './types';
@@ -24,6 +24,9 @@ declare global {
 import { fileStorageService } from './services/fileStorageService';
 import { fetchAllSellerRows, upsertSeller, deleteSeller, upsertSellers, SellerRow } from './services/supabaseService';
 import { logger } from './services/loggerService';
+import { getSession, clearSession, AppUser } from './services/authService';
+import LoginScreen from './components/LoginScreen';
+import AdminPage from './components/AdminPage';
 import { useAuditList } from './src/hooks/useAuditList';
 import { buildAuditCSV, downloadCSV } from './src/lib/csvExport';
 import { parseERPRows } from './src/lib/erpParser';
@@ -31,7 +34,13 @@ import { parseERPRows } from './src/lib/erpParser';
 const BUYER_TAX_ID_REQUIRED = "16547744";
 
 const App: React.FC = () => {
-    const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB'>('PROJECT_LIST');
+    const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
+    const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB' | 'ADMIN'>('PROJECT_LIST');
+
+    console.log('[App] currentUser:', currentUser);
+    if (!currentUser) {
+        return <LoginScreen onLogin={user => setCurrentUser(user)} />;
+    }
     const {
         projectList,
         project,
@@ -43,6 +52,8 @@ const App: React.FC = () => {
         toggleErpFlag,
         updateProjectMeta,
         setProject,
+        saveSnapshot,
+        forceSave,
     } = useProject();
 
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -59,6 +70,7 @@ const App: React.FC = () => {
         project,
         selectedModel,
         updateProjectInvoices: updateInvoices,
+        onBatchComplete: forceSave,
     });
 
     const [isCreating, setIsCreating] = useState(false);
@@ -319,6 +331,10 @@ const App: React.FC = () => {
 
     // --- Views ---
 
+    if (view === 'ADMIN') {
+        return <AdminPage currentUser={currentUser} onBack={() => setView('PROJECT_LIST')} />;
+    }
+
     if (view === 'ERROR_REVIEW' && project) {
         return (
             <ErrorReviewPage
@@ -459,11 +475,25 @@ const App: React.FC = () => {
                             <p className="text-gray-500 mt-2 font-medium">請選擇或建立月份稽核專案</p>
                         </div>
                         <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 px-4 py-2.5 rounded-xl font-mono">
+                                <span className="font-bold text-gray-700">{currentUser.employee_id}</span>
+                                <span className="text-gray-400">·</span>
+                                <span>{currentUser.name}</span>
+                                {currentUser.is_admin && <span className="text-[10px] bg-indigo-100 text-indigo-700 font-bold px-1.5 py-0.5 rounded">ADMIN</span>}
+                            </div>
+                            {currentUser.is_admin && (
+                                <button onClick={() => setView('ADMIN')} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 px-4 py-2.5 rounded-xl font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95">
+                                    <Users className="w-4 h-4" /> 使用者管理
+                                </button>
+                            )}
                             <button onClick={() => { setView('SELLER_DB'); loadSellerDB(); }} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 px-5 py-3 rounded-xl font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95">
                                 <Database className="w-4 h-4" /> 廠商資料庫
                             </button>
                             <button onClick={() => setIsCreating(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95">
                                 <PlusSquare className="w-5 h-5" /> 建立新專案
+                            </button>
+                            <button onClick={() => { clearSession(); setCurrentUser(null); }} className="p-3 text-gray-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" title="登出">
+                                <LogOut className="w-4 h-4" />
                             </button>
                         </div>
                     </div>
@@ -680,7 +710,7 @@ const App: React.FC = () => {
                     )}
                 </header>
                 <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-1 flex items-center justify-between text-xs">
-                    <CostDashboard project={project} auditCoverage={metrics.auditCoverage} discrepancyCount={metrics.discrepancyCount} modelName={selectedModel} totalDuration={metrics.duration} uploaded={metrics.uploaded} missing={metrics.missing} total={metrics.total} />
+                    <CostDashboard project={project} auditCoverage={metrics.auditCoverage} discrepancyCount={metrics.discrepancyCount} modelName={selectedModel} totalDuration={metrics.duration} uploaded={metrics.uploaded} missing={metrics.missing} total={metrics.total} proEscalatedCount={metrics.proEscalatedCount} proEscalationRate={metrics.proEscalationRate} />
                     {progress.status !== 'IDLE' && (
                         <div className="flex items-center gap-3">
                             <span className="font-mono font-bold text-indigo-600 flex items-center gap-2">
