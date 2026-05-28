@@ -43,9 +43,6 @@ export async function login(employeeId: string, name: string): Promise<{ user: A
   const eid = employeeId.trim().toUpperCase();
   const nm = name.trim();
 
-  console.log('[authService] login attempt:', { eid, nm });
-  console.log('[authService] client:', client);
-
   if (!eid || !nm) return { user: null, error: '請填寫工號與姓名' };
   if (!/^[A-Z][0-9]{4}$/.test(eid)) return { user: null, error: '工號格式錯誤（例：A1282）' };
 
@@ -56,7 +53,6 @@ export async function login(employeeId: string, name: string): Promise<{ user: A
     .eq('employee_id', eid)
     .maybeSingle();
 
-  console.log('[authService] fetchErr:', fetchErr);
   if (fetchErr) return { user: null, error: `登入失敗：${fetchErr.message}` };
 
   if (existing) {

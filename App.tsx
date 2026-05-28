@@ -37,7 +37,6 @@ const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
     const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB' | 'ADMIN'>('PROJECT_LIST');
 
-    console.log('[App] currentUser:', currentUser);
     if (!currentUser) {
         return <LoginScreen onLogin={user => setCurrentUser(user)} />;
     }
