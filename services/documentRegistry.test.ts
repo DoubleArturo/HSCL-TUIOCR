@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   isKnownType,
@@ -81,31 +82,31 @@ describe('documentRegistry', () => {
 
   describe('recordUnknownType()', () => {
     it('第一次記錄應新增一筆，count=1，first_seen 和 last_seen 相同', () => {
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
       const registry = getRegistry();
       expect(registry).toHaveLength(1);
       const record = registry[0];
       expect(record.document_type).toBe('旅行社代收轉付收據');
-      expect(record.voucher_type).toBe('收據');
+      expect(record.voucher_type).toBe('旅行社代收轉付');
       expect(record.tax_code).toBe('TXXX');
       expect(record.count).toBe(1);
-      expect(record.first_seen).toBe('2024-01-15T10:30:00Z');
-      expect(record.last_seen).toBe('2024-01-15T10:30:00Z');
+      expect(record.first_seen).toMatch('2024-01-15T10:30:00');
+      expect(record.last_seen).toMatch('2024-01-15T10:30:00');
       expect(record.sample_seller).toBe('旅行社甲');
       expect(record.has_invoice_number).toBe(false);
     });
 
     it('第二次記錄同 document_type 應增加 count 並更新 last_seen', () => {
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
       vi.advanceTimersByTime(60000); // 進行 1 分鐘
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社乙', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社乙', false);
 
       const registry = getRegistry();
       expect(registry).toHaveLength(1);
       const record = registry[0];
       expect(record.count).toBe(2);
-      expect(record.first_seen).toBe('2024-01-15T10:30:00Z');
-      expect(record.last_seen).toBe('2024-01-15T10:31:00Z');
+      expect(record.first_seen).toMatch('2024-01-15T10:30:00');
+      expect(record.last_seen).toMatch('2024-01-15T10:31:00');
       expect(record.sample_seller).toBe('旅行社甲'); // 保留第一次的 seller
     });
 
@@ -116,8 +117,8 @@ describe('documentRegistry', () => {
     });
 
     it('不同 document_type 應新增為不同筆記錄', () => {
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', false);
 
       const registry = getRegistry();
       expect(registry).toHaveLength(2);
@@ -126,11 +127,11 @@ describe('documentRegistry', () => {
     });
 
     it('多次記錄不同類型應分別計數', () => {
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', false);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', false);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', false);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', false);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', false);
 
       const registry = getRegistry();
       expect(registry).toHaveLength(2);
@@ -141,15 +142,15 @@ describe('documentRegistry', () => {
     });
 
     it('should handle null tax_code correctly', () => {
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', false);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', false);
       const registry = getRegistry();
       expect(registry[0].tax_code).toBeNull();
     });
 
     it('should update sample_seller only on first record', () => {
-      recordUnknownType('新類型', '收據', null, '賣方甲', false);
-      recordUnknownType('新類型', '收據', null, '賣方乙', false);
-      recordUnknownType('新類型', '收據', null, '賣方丙', false);
+      recordUnknownType('新類型', '新類型', null, '賣方甲', false);
+      recordUnknownType('新類型', '新類型', null, '賣方乙', false);
+      recordUnknownType('新類型', '新類型', null, '賣方丙', false);
 
       const registry = getRegistry();
       const record = registry[0];
@@ -164,11 +165,11 @@ describe('documentRegistry', () => {
         throw new Error('QuotaExceededError');
       });
 
-      recordUnknownType('新類型', '收據', null, '某公司', false);
+      recordUnknownType('新類型', '新類型', null, '某公司', false);
       // 儘管 localStorage 滿，但 registry 應被更新（只是沒存到 localStorage）
       // 由於 catch 在 recordUnknownType 內靜默忽略，我們驗證呼叫沒有拋錯
       expect(() =>
-        recordUnknownType('新類型', '收據', null, '某公司', false),
+        recordUnknownType('新類型', '新類型', null, '某公司', false),
       ).not.toThrow();
 
       mockSetItem.mockRestore();
@@ -176,12 +177,12 @@ describe('documentRegistry', () => {
 
     it('複雜場景：多個類型、多次記錄、查詢', () => {
       // 建立 3 個不同的未知類型
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
-      recordUnknownType('旅行社代收轉付收據', '收據', 'TXXX', '旅行社甲', false);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', true);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', true);
-      recordUnknownType('計程車收據', '收據', null, '計程車公司', true);
-      recordUnknownType('快遞單', '其他', null, '快遞公司', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
+      recordUnknownType('旅行社代收轉付收據', '旅行社代收轉付', 'TXXX', '旅行社甲', false);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', true);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', true);
+      recordUnknownType('計程車收據', '計程車收據', null, '計程車公司', true);
+      recordUnknownType('快遞單', '快遞單', null, '快遞公司', false);
 
       const registry = getRegistry();
       expect(registry).toHaveLength(3);

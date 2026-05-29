@@ -130,7 +130,7 @@ export interface AuditRow {
   files: InvoiceEntry[];
   file: InvoiceEntry | null; // Primary file
   ocr: InvoiceData | null;   // Flattened/Summary OCR data
-  auditStatus: 'MATCH' | 'MISMATCH' | 'MISSING_FILE' | 'EXTRA_FILE';
+  auditStatus: 'MATCH' | 'MISMATCH' | 'NEEDS_REVIEW' | 'MISSING_FILE' | 'EXTRA_FILE' | 'SKIPPED';
   diffDetails: string[];
   initialInvoiceIndex: number;
 }

@@ -121,11 +121,15 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
         }
       }
 
-      try {
-        logger.info('IMAGE', `Enhancing for OCR: ${processedFile.name}`);
-        processedFile = await enhanceImageForOCR(processedFile);
-      } catch (err) {
-        logger.warn('IMAGE', `Image enhancement failed (using original): ${processedFile.name}`, err);
+      // 圖像增強只對 bitmap 圖片有效（JPG/PNG/BMP），PDF 無法用 canvas 處理。
+      // Gemini 本身對 PDF 有自己的渲染能力，不需要預處理。
+      if (processedFile.type.startsWith('image/')) {
+        try {
+          logger.info('IMAGE', `Enhancing for OCR: ${processedFile.name}`);
+          processedFile = await enhanceImageForOCR(processedFile);
+        } catch (err) {
+          logger.warn('IMAGE', `Image enhancement failed (using original): ${processedFile.name}`, err);
+        }
       }
 
       const filename = processedFile.name;
@@ -242,15 +246,44 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
 
         let expectedERP = undefined;
         if (project && project.erpData) {
-          const matchingErp = project.erpData.find(erp =>
+          // 取出此憑證的「所有」ERP 行（同一個 voucher_id 可能有多行）
+          const allMatchingErp = project.erpData.filter(erp =>
             item.id === erp.voucher_id || item.id.startsWith(erp.voucher_id + '-') || item.id.startsWith(erp.voucher_id + '_')
           );
-          if (matchingErp) {
+          if (allMatchingErp.length > 0) {
+            const allInvNos = allMatchingErp.flatMap(e => e.invoice_numbers || []);
+
+            // tax_code：只有全部 ERP 行的稅別相同時才傳（混合稅別不傳，避免誤導 prompt）
+            const uniqueTaxCodes = [...new Set(allMatchingErp.map(e => (e.tax_code || '').toUpperCase()).filter(Boolean))];
+            const sharedTaxCode  = uniqueTaxCodes.length === 1 ? uniqueTaxCodes[0] : undefined;
+
+            // T500/TXXX/T400：這些稅別不需要金額 cross-check（交通票券、收據、海關文件各有特殊格式），
+            // 也不需要發票號碼格式驗證，傳 expectedERP 只會觸發無意義的 Pro 升級。
+            const noValidationTypes = new Set(['T500', 'TXXX', 'T400']);
+            const allNoValidation = allMatchingErp.every(e => noValidationTypes.has((e.tax_code || '').toUpperCase()));
+
+            // 多檔案憑證（ID 結尾 -N，例如 G12-Q50057-3）：
+            // 每個檔案只含部分發票，聚合金額必然和單一檔案 OCR 不符，
+            // 傳金額只會觸發無意義的 Pro 升級。只傳 invoice_numbers + tax_code 作 prompt hint。
+            const isMultiFileVoucher = /-\d+$/.test(item.id);
+
+            // 不傳金額的條件：全為免驗證稅別 OR 多檔案憑證
+            const skipAmountCheck = allNoValidation || isMultiFileVoucher;
+
+            // invoice_numbers 的傳法：
+            // - 免驗證稅別（T500/TXXX/T400）：不傳（完全不需要 cross-check）
+            // - 多檔案憑證（-N 結尾）：不傳（每個檔案只含部分發票，傳完整清單會觸發
+            //   count_mismatch 升 Pro，導致 7 個 PDF 各升一次 Pro，結果延遲回來覆蓋 Flash 結果，
+            //   使用者看到「完成」後結果又跳動）。只傳 tax_code 作 prompt hint。
+            // - 單檔案憑證：傳完整清單（正常 count_mismatch 有意義）
+            const skipInvNos = allNoValidation || isMultiFileVoucher;
+
             expectedERP = {
-              amount_total: matchingErp.amount_total,
-              amount_sales: matchingErp.amount_sales,
-              amount_tax: matchingErp.amount_tax,
-              invoice_numbers: matchingErp.invoice_numbers
+              amount_total: skipAmountCheck ? undefined : allMatchingErp.reduce((s, e) => s + (e.amount_total || 0), 0),
+              amount_sales: skipAmountCheck ? undefined : allMatchingErp.reduce((s, e) => s + (e.amount_sales || 0), 0),
+              amount_tax:   skipAmountCheck ? undefined : allMatchingErp.reduce((s, e) => s + (e.amount_tax || 0), 0),
+              invoice_numbers: skipInvNos ? undefined : allInvNos,
+              tax_code: sharedTaxCode,
             };
           }
         }

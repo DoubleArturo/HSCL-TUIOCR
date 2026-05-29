@@ -46,59 +46,48 @@ const InvoiceForm: React.FC<Props> = ({
         return 'minor';
     };
 
-    const getScoreBadgeStyle = (score: number, field: string) => {
-        if (score >= 100) return 'bg-emerald-500 text-white';
-        const severity = getFieldSeverity(field);
-        if (severity === 'critical') return 'bg-rose-600 text-white';
-        if (severity === 'warning') return 'bg-amber-500 text-white';
-        return 'bg-slate-500 text-white';
+    // 欄位狀態：由 flagged_fields（checksum / format 驗證結果）驅動，不用 ai_confidence
+    const isFieldFlagged = (field: string): boolean =>
+        !!formData.verification?.flagged_fields?.includes(field);
+
+    const hasErpMismatch = (field: string): boolean => {
+        if (!erpRecord) return false;
+        if (field === 'seller_tax_id' && erpRecord.seller_tax_id && formData.seller_tax_id != erpRecord.seller_tax_id) return true;
+        if (field === 'amount_total' && erpRecord.amount_total && formData.amount_total != erpRecord.amount_total) return true;
+        return false;
     };
 
-    const getFieldContainerStyle = (score: number, field: string) => {
-        // Highlighting Logic: Check if field is flagged in verification.flagged_fields OR ERP Mismatch
-        const isFlagged = formData.verification?.flagged_fields?.includes(field);
-        let isErpMismatch = false;
-
-        if (erpRecord) {
-            // Compare string values roughly
-            if (field === 'seller_tax_id' && erpRecord.seller_tax_id && formData.seller_tax_id != erpRecord.seller_tax_id) isErpMismatch = true;
-            if (field === 'amount_total' && erpRecord.amount_total && formData.amount_total != erpRecord.amount_total) isErpMismatch = true;
+    const getFieldContainerStyle = (field: string) => {
+        if (isFieldFlagged(field) || hasErpMismatch(field)) {
+            return 'bg-rose-50 border-rose-500 ring-2 ring-rose-200 shadow-sm';
         }
-
-        if (isFlagged || isErpMismatch) {
-            return 'bg-rose-50 border-rose-500 ring-2 ring-rose-200 shadow-sm animate-pulse-once'; // Distinct Red for Error
-        }
-
-        if (score >= 90) return 'bg-white border-gray-200 focus-within:border-indigo-500';
-        const severity = getFieldSeverity(field);
-        if (severity === 'critical') return 'bg-rose-50 border-rose-400 ring-2 ring-rose-100 shadow-sm';
-        if (severity === 'warning') return 'bg-amber-50 border-amber-300 ring-2 ring-amber-50 shadow-sm';
-        return 'bg-slate-50 border-slate-300 ring-2 ring-slate-50 shadow-sm';
+        return 'bg-white border-gray-200 focus-within:border-indigo-500';
     };
 
-    const FieldHeader = ({ label, field, score }: { label: string, field: string, score: number }) => {
-        const isFlagged = formData.verification?.flagged_fields?.includes(field);
+    // FieldHeader: 顯示欄位標籤 + 驗證狀態圖示（移除 ai_confidence %）
+    // 狀態圖示規則：
+    //   ✗ AlertTriangle（紅/橘）= flagged_fields 裡有此欄位（checksum 失敗 / 格式錯誤）
+    //   ● 綠點 = 通過所有驗證
+    const FieldHeader = ({ label, field }: { label: string, field: string }) => {
+        const flagged = isFieldFlagged(field);
         const severity = getFieldSeverity(field);
-        const alertColor = (isFlagged && severity === 'critical') ? 'text-rose-600' : (severity === 'warning' ? 'text-amber-500' : 'text-slate-500');
+        const iconColor = severity === 'critical' ? 'text-rose-500' : 'text-amber-400';
 
         return (
-            <label className="flex items-center justify-between text-xs font-black text-gray-500 mb-1.5 uppercase tracking-wider group/label">
+            <label className="flex items-center justify-between text-xs font-black text-gray-500 mb-1.5 uppercase tracking-wider">
                 <span className="flex items-center gap-1.5">
                     {label}
-                    {isFlagged && (<Lucide.AlertTriangle className={`w-3.5 h-3.5 ${alertColor}`} />)}
+                    {flagged && <Lucide.AlertTriangle className={`w-3.5 h-3.5 ${iconColor}`} />}
                 </span>
-                <div className="flex items-center gap-2" title={`AI Confidence: ${score}%`}>
-                    {score < 90 ? (
-                        <span className={`text-[10px] font-bold ${score < 80 ? 'text-amber-600' : 'text-slate-400'}`}>
-                            {score}%
-                        </span>
-                    ) : (
-                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 opacity-50 group-hover/label:opacity-100 transition-opacity"></div>
-                    )}
-                </div>
+                {!flagged && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 opacity-40" />
+                )}
             </label>
         );
     };
+
+    // 金額欄位高亮：用算術一致性判斷，不用 ai_confidence
+    const amountArithmeticOk = Math.abs((formData.amount_sales || 0) + (formData.amount_tax || 0) - (formData.amount_total || 0)) <= 1;
 
     // Quick Fix Handler
 
@@ -259,7 +248,7 @@ const InvoiceForm: React.FC<Props> = ({
                 <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <FieldHeader label="憑證類型" field="document_type" score={100} />
+                            <FieldHeader label="憑證類型" field="document_type" />
                             <select
                                 className="w-full border rounded-xl px-3 py-2 text-sm font-bold text-indigo-700 bg-indigo-50 border-indigo-200 focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
                                 value={formData.voucher_type || formData.document_type || ''}
@@ -274,28 +263,28 @@ const InvoiceForm: React.FC<Props> = ({
                                 <option value="非發票">非發票</option>
                             </select>
                         </div>
-                        <div><FieldHeader label="憑證號碼" field="invoice_number" score={formData.field_confidence.invoice_number} /><input type="text" className={`w-full border rounded-xl px-3 py-2 font-mono text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_number, 'invoice_number')}`} value={formData.invoice_number || ''} onChange={(e) => handleChange('invoice_number', e.target.value)} /></div>
+                        <div><FieldHeader label="憑證號碼" field="invoice_number" /><input type="text" className={`w-full border rounded-xl px-3 py-2 font-mono text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle('invoice_number')}`} value={formData.invoice_number || ''} onChange={(e) => handleChange('invoice_number', e.target.value)} /></div>
                     </div>
                     <div>
-                        <FieldHeader label="開立日期" field="invoice_date" score={formData.field_confidence.invoice_date} />
-                        <input type="date" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.invoice_date, 'invoice_date')}`} value={formData.invoice_date || ''} onChange={(e) => handleChange('invoice_date', e.target.value)} />
+                        <FieldHeader label="開立日期" field="invoice_date" />
+                        <input type="date" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle('invoice_date')}`} value={formData.invoice_date || ''} onChange={(e) => handleChange('invoice_date', e.target.value)} />
                     </div>
 
                     <div className="grid grid-cols-12 gap-3">
-                        <div className="col-span-3"><FieldHeader label="幣別" field="currency" score={formData.field_confidence.currency} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.currency || 100, 'currency')}`} value={formData.currency || 'TWD'} onChange={(e) => handleChange('currency', e.target.value)} /></div>
-                        <div className="col-span-4"><FieldHeader label="賣方統編" field="seller_tax_id" score={formData.field_confidence.seller_tax_id} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.seller_tax_id, 'seller_tax_id')}`} value={formData.seller_tax_id || ''} onChange={(e) => handleChange('seller_tax_id', e.target.value)} /></div>
-                        <div className="col-span-5"><FieldHeader label="公司名稱" field="seller_name" score={formData.field_confidence.seller_name} /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle(formData.field_confidence.seller_name, 'seller_name')}`} value={formData.seller_name || ''} onChange={(e) => handleChange('seller_name', e.target.value)} /></div>
+                        <div className="col-span-3"><FieldHeader label="幣別" field="currency" /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle('currency')}`} value={formData.currency || 'TWD'} onChange={(e) => handleChange('currency', e.target.value)} /></div>
+                        <div className="col-span-4"><FieldHeader label="賣方統編" field="seller_tax_id" /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-mono font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle('seller_tax_id')}`} value={formData.seller_tax_id || ''} onChange={(e) => handleChange('seller_tax_id', e.target.value)} /></div>
+                        <div className="col-span-5"><FieldHeader label="公司名稱" field="seller_name" /><input type="text" className={`w-full border rounded-xl px-3 py-2 text-xs font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 transition-all outline-none ${getFieldContainerStyle('seller_name')}`} value={formData.seller_name || ''} onChange={(e) => handleChange('seller_name', e.target.value)} /></div>
                     </div>
 
                     <div className="p-4 bg-gray-900 rounded-2xl shadow-xl border border-gray-800">
                         <div className="space-y-3">
                             <div className="grid grid-cols-2 gap-3">
-                                <div><FieldHeader label="銷售額合計" field="amount_sales" score={formData.field_confidence.amount_sales} /><input type="number" className={`w-full text-left bg-gray-800/50 border border-gray-700 rounded-lg p-1.5 text-white focus:border-indigo-400 outline-none text-sm font-bold ${formData.field_confidence.amount_sales < 100 ? 'text-amber-400 border-amber-500/50' : ''}`} value={formData.amount_sales} onChange={(e) => handleChange('amount_sales', parseInt(e.target.value) || 0)} /></div>
-                                <div><FieldHeader label="營業稅" field="amount_tax" score={formData.field_confidence.amount_tax} /><input type="number" className={`w-full text-left bg-gray-800/50 border border-gray-700 rounded-lg p-1.5 text-white focus:border-indigo-400 outline-none text-sm font-bold ${formData.field_confidence.amount_tax < 100 ? 'text-rose-400 border-rose-500/50' : ''}`} value={formData.amount_tax} onChange={(e) => handleChange('amount_tax', parseInt(e.target.value) || 0)} /></div>
+                                <div><FieldHeader label="銷售額合計" field="amount_sales" /><input type="number" className={`w-full text-left bg-gray-800/50 border border-gray-700 rounded-lg p-1.5 focus:border-indigo-400 outline-none text-sm font-bold ${!amountArithmeticOk ? 'text-amber-400 border-amber-500/50' : 'text-white'}`} value={formData.amount_sales} onChange={(e) => handleChange('amount_sales', parseInt(e.target.value) || 0)} /></div>
+                                <div><FieldHeader label="營業稅" field="amount_tax" /><input type="number" className={`w-full text-left bg-gray-800/50 border border-gray-700 rounded-lg p-1.5 focus:border-indigo-400 outline-none text-sm font-bold ${!amountArithmeticOk ? 'text-rose-400 border-rose-500/50' : 'text-white'}`} value={formData.amount_tax} onChange={(e) => handleChange('amount_tax', parseInt(e.target.value) || 0)} /></div>
                             </div>
                             <div className="pt-2 border-t border-gray-800 flex items-center justify-between">
-                                <FieldHeader label="總計" field="amount_total" score={formData.field_confidence.amount_total} />
-                                <input type="number" className={`w-[180px] text-right bg-transparent focus:text-indigo-400 outline-none text-2xl font-black ${formData.field_confidence.amount_total < 100 ? 'text-amber-400' : 'text-white'}`} value={formData.amount_total} onChange={(e) => handleChange('amount_total', parseInt(e.target.value) || 0)} />
+                                <FieldHeader label="總計" field="amount_total" />
+                                <input type="number" className={`w-[180px] text-right bg-transparent focus:text-indigo-400 outline-none text-2xl font-black ${!amountArithmeticOk ? 'text-amber-400' : 'text-white'}`} value={formData.amount_total} onChange={(e) => handleChange('amount_total', parseInt(e.target.value) || 0)} />
                             </div>
                         </div>
                     </div>

@@ -171,16 +171,17 @@ If the ENTIRE document (all pages) contains only generic unbillable documents (P
 
 function buildSystemPrompt(expectedERP?: ExpectedERP, validationRetryCount = 0): string {
   // ===== 動態 prompt 組合 =====
+  // 稅別跟發票格式是綁定的：只要 ERP 告訴我們稅別，第一次 pass 就直接注入 type 模組，
+  // 讓 Gemini 不需要自己分類，減少 T300/T302 等混淆。
   let systemPrompt = PROMPT_BASE;
 
-  // 如果是重試且 expectedERP 有 tax_code，載入對應類型的詳細 prompt
-  if (validationRetryCount > 0 && expectedERP?.tax_code) {
+  if (expectedERP?.tax_code) {
+    // 無論是否是 retry，只要 ERP 已知稅別，就注入對應的 type module。
+    // Type module 放在 base 之後，讓 Gemini 先讀 base rules，再讀 type-specific fingerprint。
     const typePrompt = getTypeSpecificPrompt(expectedERP.tax_code);
     if (typePrompt) systemPrompt += '\n\n' + typePrompt;
-  }
-
-  // 沒有已知 tax_code 時，載入 unknown 類型的引導
-  if (!expectedERP?.tax_code) {
+  } else {
+    // 未知稅別：注入視覺分類樹 + 未知類型處理引導
     const registry = getRegistry();
     const unknownPrompt = buildUnknownTypePrompt(registry);
     systemPrompt += '\n\n' + unknownPrompt;
@@ -298,26 +299,56 @@ async function postProcessItems(
     }
 
 
-    // A. Seller Tax ID Logic (Database Lookup)
-    // If we extracted a name but ID is unclear, try to find in DB
-    if (item.seller_name && (!item.seller_tax_id || item.seller_tax_id.includes('?'))) {
+    // ===== SELLER TAX ID：DB 查詢 + Checksum 驗證 + 自動修正 =====
+    const { validateTaiwanTaxId } = await import('../src/lib/taxIdValidator');
+    const BUYER_TAX_IDS = ['16547744'];
+
+    // Helper: 從 MERGED_SELLERS 查 seller_name → 找最接近的合法 tax_id
+    const lookupSellerTaxId = (sellerName: string): string | undefined => {
       for (const [name, id] of Object.entries(MERGED_SELLERS)) {
-        if (item.seller_name.includes(name) || name.includes(item.seller_name)) {
-          item.seller_tax_id = id;
-          logs.push(`Enriched: Found Seller Tax ID from DB (${name} -> ${id})`);
-          break;
+        if (
+          (sellerName.includes(name) || name.includes(sellerName)) &&
+          validateTaiwanTaxId(id)
+        ) return id;
+      }
+      return undefined;
+    };
+
+    // Step 1: 缺值 / 有 ? → DB 補值
+    if (item.seller_name && (!item.seller_tax_id || item.seller_tax_id.includes('?'))) {
+      const found = lookupSellerTaxId(item.seller_name);
+      if (found) {
+        logs.push(`Enriched seller_tax_id from DB: ${item.seller_tax_id ?? 'null'} → ${found}`);
+        item.seller_tax_id = found;
+      } else if (item.seller_tax_id?.includes('?')) {
+        item.verification.flagged_fields.push('seller_tax_id');
+        logs.push(`seller_tax_id has unclear digits, no DB match found`);
+      }
+    }
+
+    // Step 2: 有值但 Checksum 驗失敗 → DB 自動修正
+    if (item.seller_tax_id && /^\d{8}$/.test(item.seller_tax_id)) {
+      if (!validateTaiwanTaxId(item.seller_tax_id)) {
+        const wrong = item.seller_tax_id;
+        const corrected = item.seller_name ? lookupSellerTaxId(item.seller_name) : undefined;
+        if (corrected) {
+          item.seller_tax_id = corrected;
+          logs.push(`Auto-corrected seller_tax_id: ${wrong} → ${corrected} (checksum failed, DB lookup)`);
+        } else {
+          item.verification.flagged_fields.push('seller_tax_id');
+          logs.push(`seller_tax_id ${wrong} failed checksum, no DB correction found`);
         }
       }
     }
 
-    // B. Auto-save new seller to Supabase (never save our own buyer tax ID)
-    const BUYER_TAX_IDS = ['16547744'];
+    // Step 3: 合法的 seller_tax_id → 回存 Supabase（自動累積廠商庫）
     if (
       item.seller_name &&
       item.seller_tax_id &&
       /^\d{8}$/.test(item.seller_tax_id) &&
       !item.seller_tax_id.includes('?') &&
-      !BUYER_TAX_IDS.includes(item.seller_tax_id)
+      !BUYER_TAX_IDS.includes(item.seller_tax_id) &&
+      validateTaiwanTaxId(item.seller_tax_id)
     ) {
       try {
         const { upsertSeller } = await import('./supabaseService');
@@ -328,65 +359,35 @@ async function postProcessItems(
       }
     }
 
-    // C. Unified Invoice Format Validation (GUI Rule)
-    // Rule: 2 Uppercase Letters + 8 Digits
-    if (item.invoice_number) {
-      const cleanInv = item.invoice_number.replace(/[^A-Z0-9]/g, '');
-      // Regex: Starts with 2 letters, followed by 8 digits
-      const guiRegex = /^[A-Z]{2}\d{8}$/;
-      // Only apply strict warning if it looks like a Standard GUI (not 'INV-...' style)
-      if (!item.invoice_number.startsWith('INV') && !item.invoice_number.includes('-')) {
-        if (!guiRegex.test(cleanInv)) {
-          logs.push(`Warning: Invoice Number ${cleanInv} does not match standard Taiwan GUI format (2 Letters + 8 Digits)`);
-          // We don't fail validation yet, just warn/cloud log, unless confidence is low
-        }
+    // ===== BUYER TAX ID：Checksum + 自動修正到本公司統編 =====
+    // 台灣三聯/二聯式發票的買方一律是本公司 (16547744)。
+    // OCR 誤讀（? 佔位 / checksum 失敗）→ 自動修正回正確值，不再 flag 為錯誤。
+    const BUYER_COMPANY_TAX_ID = '16547744';
+    const isTWInvoice = ['T300', 'T301', 'T302'].includes((item.tax_code || '').toUpperCase());
+    if (isTWInvoice && item.buyer_tax_id) {
+      const hasQmark = item.buyer_tax_id.includes('?');
+      const isValid8Digits = /^\d{8}$/.test(item.buyer_tax_id);
+      const failsChecksum = isValid8Digits && !validateTaiwanTaxId(item.buyer_tax_id);
+      const isWrongBuyer = isValid8Digits && !hasQmark && item.buyer_tax_id !== BUYER_COMPANY_TAX_ID;
+
+      if (hasQmark || failsChecksum) {
+        // OCR 誤讀 → 自動修正
+        logs.push(`Auto-corrected buyer_tax_id: ${item.buyer_tax_id} → ${BUYER_COMPANY_TAX_ID} (${hasQmark ? 'unclear digit' : 'checksum failed'})`);
+        item.buyer_tax_id = BUYER_COMPANY_TAX_ID;
+      } else if (isWrongBuyer) {
+        // Checksum 合法但不是本公司 → 保留並 flag（可能是業務場合）
+        item.verification.flagged_fields.push('buyer_tax_id');
+        logs.push(`buyer_tax_id ${item.buyer_tax_id} ≠ expected ${BUYER_COMPANY_TAX_ID} (valid checksum, flagged for review)`);
+      } else {
+        logs.push(`buyer_tax_id OK: ${item.buyer_tax_id}`);
       }
     }
 
-    // Rule 1: Force remove all whitespaces from Invoice Number
+    // Rule 1: 清除發票號碼空白 + 轉大寫
     if (item.invoice_number) {
       const original = item.invoice_number;
       item.invoice_number = item.invoice_number.replace(/\s+/g, '').toUpperCase();
-      if (original !== item.invoice_number) logs.push(`Rule 1: Cleaned Invoice Number (${original} -> ${item.invoice_number})`);
-    }
-
-    // Rule 2: Check for '?' in Seller Tax ID and flag it
-    if (item.seller_tax_id && item.seller_tax_id.includes('?')) {
-      if (!item.verification.flagged_fields.includes('seller_tax_id')) {
-        item.verification.flagged_fields.push('seller_tax_id');
-        logs.push(`Rule 2: Flagged unclear Seller Tax ID (${item.seller_tax_id})`);
-      }
-    }
-
-    // Rule 2b: Validate Taiwan tax ID checksum (mod-5 rule, post-2023 amendment)
-    if (item.seller_tax_id && /^\d{8}$/.test(item.seller_tax_id)) {
-      const { validateTaiwanTaxId } = await import('../src/lib/taxIdValidator');
-      if (!validateTaiwanTaxId(item.seller_tax_id)) {
-        if (!item.verification.flagged_fields.includes('seller_tax_id')) {
-          item.verification.flagged_fields.push('seller_tax_id');
-        }
-        logs.push(`Rule 2b: Seller Tax ID ${item.seller_tax_id} failed checksum (mod-5 rule)`);
-      }
-    }
-
-    // Rule 2c: Validate buyer_tax_id
-    const EXPECTED_BUYER_TAX_IDS = ['16547744'];
-    if (item.buyer_tax_id) {
-      if (item.buyer_tax_id.includes('?')) {
-        if (!item.verification.flagged_fields.includes('buyer_tax_id')) {
-          item.verification.flagged_fields.push('buyer_tax_id');
-          logs.push(`Rule 2c: Flagged unclear Buyer Tax ID (${item.buyer_tax_id})`);
-        }
-      } else if (/^\d{8}$/.test(item.buyer_tax_id)) {
-        if (!EXPECTED_BUYER_TAX_IDS.includes(item.buyer_tax_id)) {
-          if (!item.verification.flagged_fields.includes('buyer_tax_id')) {
-            item.verification.flagged_fields.push('buyer_tax_id');
-            logs.push(`Rule 2c: Buyer Tax ID ${item.buyer_tax_id} does not match expected (${EXPECTED_BUYER_TAX_IDS.join(', ')})`);
-          }
-        } else {
-          logs.push(`Rule 2c: Buyer Tax ID validated OK (${item.buyer_tax_id})`);
-        }
-      }
+      if (original !== item.invoice_number) logs.push(`Rule 1: Cleaned invoice_number (${original} → ${item.invoice_number})`);
     }
 
     // --- c) 自動金額修正 ---
@@ -641,6 +642,19 @@ export const analyzeInvoice = async (
         if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1) {
           hasMismatch = true;
           mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
+        }
+
+        // 多張發票憑證：OCR 取出的數量少於 ERP 期望數量，也觸發 Pro 升級
+        const countMismatch =
+          expectedERP.invoice_numbers &&
+          expectedERP.invoice_numbers.length > 1 &&
+          validInvoices.filter(r => r.invoice_number).length < expectedERP.invoice_numbers.length;
+
+        if (countMismatch && !hasMismatch) {
+          hasMismatch = true;
+          mismatchLogs.push(
+            `Count mismatch: ERP expects ${expectedERP.invoice_numbers!.length} invoices, OCR found ${validInvoices.filter(r => r.invoice_number).length}`,
+          );
         }
 
         if (hasMismatch) {

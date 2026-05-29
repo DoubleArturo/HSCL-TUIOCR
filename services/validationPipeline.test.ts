@@ -274,3 +274,29 @@ describe('autoCorrectAmounts()', () => {
     });
   });
 });
+
+// ===== T500/TXXX/T400 invoice_number 格式檢查豁免 =====
+describe('validateInvoice() - 特殊稅別跳過發票號碼格式驗證', () => {
+  // 這三種稅別的發票號碼格式不是台灣 2L+8D，不應觸發 GUI_FORMAT / GUI_LENGTH
+  const exemptTypes: Array<{ tax_code: string; invoice_number: string; desc: string }> = [
+    { tax_code: 'T500', invoice_number: '2903201198093', desc: 'T500 交通票券 13 碼條碼' },
+    { tax_code: 'T500', invoice_number: '10-1-02-0-125-0188', desc: 'T500 票根含破折號' },
+    { tax_code: 'TXXX', invoice_number: 'RECEIPT-2026-001', desc: 'TXXX 收據自訂號碼' },
+    { tax_code: 'TXXX', invoice_number: 'BE15265E2121', desc: 'TXXX 含數字+字母混合' },
+    { tax_code: 'T400', invoice_number: 'CXI31150202400', desc: 'T400 海關進口證明 ID' },
+  ];
+
+  exemptTypes.forEach(({ tax_code, invoice_number, desc }) => {
+    it(`${desc} (${tax_code}) — 不觸發 GUI_FORMAT`, () => {
+      const item = makeInvoice({ tax_code: tax_code as any, invoice_number });
+      const failures = validateInvoice(item);
+      expect(failures.filter(f => f.rule === 'GUI_FORMAT' || f.rule === 'GUI_LENGTH')).toHaveLength(0);
+    });
+  });
+
+  it('T302 一般發票 AB123456789（11 碼）仍應觸發 GUI_FORMAT', () => {
+    const item = makeInvoice({ tax_code: 'T302' as any, invoice_number: 'AB123456789' });
+    const failures = validateInvoice(item);
+    expect(failures.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+  });
+});

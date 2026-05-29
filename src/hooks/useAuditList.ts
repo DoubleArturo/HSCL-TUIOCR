@@ -48,9 +48,11 @@ export function useAuditList(project: Project | null, batchDuration: number): { 
     const n = uploaded.length;
     // 稽核覆蓋率 = 已匯入 / (已匯入 + 未匯入)
     const auditCoverage = (n + missing) > 0 ? (n / (n + missing)) * 100 : 0;
-    // 異常捕獲數 = MISMATCH rows with at least one reviewable diff key
+    // 異常捕獲數 = MISMATCH（硬差異）+ NEEDS_REVIEW（軟警告，需人工確認）
+    // NEEDS_REVIEW 算入異常計數，但在 UI 顯示時用不同顏色區分嚴重度
     const discrepancyCount = uploaded.filter(r =>
-      r.auditStatus === 'MISMATCH' && r.diffDetails.some(d => REVIEWABLE_DIFF_KEYS.includes(d))
+      (r.auditStatus === 'MISMATCH' && r.diffDetails.some(d => REVIEWABLE_DIFF_KEYS.includes(d))) ||
+      r.auditStatus === 'NEEDS_REVIEW'
     ).length;
 
     return {
