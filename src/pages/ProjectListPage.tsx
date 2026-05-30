@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Database, PlusSquare, FolderOpen, Trash2, ChevronRight, ShieldCheck } from 'lucide-react';
+import { Database, PlusSquare, FolderOpen, Trash2, ChevronRight, ShieldCheck, LogOut } from 'lucide-react';
 import { ProjectMeta } from '../../types';
 import CreateProjectModal from '../components/modals/CreateProjectModal';
 import EditProjectModal from '../components/modals/EditProjectModal';
@@ -14,6 +14,8 @@ interface ProjectListPageProps {
   onStartEditing: (p: ProjectMeta, e: React.MouseEvent) => void;
   onSaveEdit: (id: string, name: string, year: number, month: number) => void;
   onCancelEdit: () => void;
+  userEmail?: string;
+  onSignOut?: () => void;
 }
 
 export default function ProjectListPage({
@@ -26,6 +28,8 @@ export default function ProjectListPage({
   onStartEditing,
   onSaveEdit,
   onCancelEdit,
+  userEmail,
+  onSignOut,
 }: ProjectListPageProps) {
   const [isCreating, setIsCreating] = useState(false);
 
@@ -41,6 +45,14 @@ export default function ProjectListPage({
             <p className="text-gray-500 mt-2 font-medium">請選擇或建立月份稽核專案</p>
           </div>
           <div className="flex items-center gap-3">
+            {userEmail && onSignOut && (
+              <div className="flex items-center gap-2 bg-white border border-gray-200 rounded-xl px-4 py-2.5 shadow-sm">
+                <span className="text-xs text-gray-500 font-medium max-w-[180px] truncate">{userEmail}</span>
+                <button onClick={onSignOut} className="text-gray-400 hover:text-rose-500 transition-colors ml-1" title="登出">
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            )}
             <button onClick={onOpenSellerDB} className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-600 px-5 py-3 rounded-xl font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95">
               <Database className="w-4 h-4" /> 廠商資料庫
             </button>

@@ -7,6 +7,7 @@ import ErrorReviewPage from './components/ErrorReviewPage';
 import * as XLSX from 'xlsx';
 import { useProject } from './src/hooks/useProject';
 import { useOCRBatch } from './src/hooks/useOCRBatch';
+import { useAuth } from './src/hooks/useAuth';
 import { fileStorageService } from './services/fileStorageService';
 import { upsertSellers } from './services/supabaseService';
 import { logger } from './services/loggerService';
@@ -16,6 +17,7 @@ import { parseERPRows } from './src/lib/erpParser';
 import ProjectListPage from './src/pages/ProjectListPage';
 import SellerDBPage from './src/pages/SellerDBPage';
 import WorkspacePage from './src/pages/WorkspacePage';
+import AuthPage from './src/pages/AuthPage';
 
 declare global {
     interface AIStudio {
@@ -26,6 +28,7 @@ declare global {
 }
 
 const App: React.FC = () => {
+    const { user, loading: authLoading, signOut } = useAuth();
     const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB'>('PROJECT_LIST');
     const {
         projectList,
@@ -38,7 +41,7 @@ const App: React.FC = () => {
         toggleErpFlag,
         updateProjectMeta,
         setProject,
-    } = useProject();
+    } = useProject(user?.id);
 
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);
@@ -252,6 +255,21 @@ const App: React.FC = () => {
 
     // --- Views ---
 
+    if (authLoading) {
+        return (
+            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3 text-gray-400">
+                    <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm font-medium">載入中...</span>
+                </div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <AuthPage />;
+    }
+
     if (view === 'ERROR_REVIEW' && project) {
         return (
             <ErrorReviewPage
@@ -280,6 +298,8 @@ const App: React.FC = () => {
                 onStartEditing={startEditingProject}
                 onSaveEdit={saveProjectEdit}
                 onCancelEdit={cancelProjectEdit}
+                userEmail={user.email}
+                onSignOut={signOut}
             />
         );
     }

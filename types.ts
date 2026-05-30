@@ -65,6 +65,7 @@ export interface InvoiceEntry {
   status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'ERROR';
   data: InvoiceData[];
   error?: string;
+  storagePath?: string; // Supabase Storage path (when cloud-synced)
 }
 
 export interface ExpectedERP {
