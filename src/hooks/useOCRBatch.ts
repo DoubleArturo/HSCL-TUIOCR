@@ -5,7 +5,8 @@ import { analyzeInvoice } from '../../services/geminiService';
 import { enhanceImageForOCR } from '../lib/imageEnhancement';
 import { fileStorageService } from '../../services/fileStorageService';
 import { logger } from '../../services/loggerService';
-import { AppStatus, InvoiceEntry, Project, ProcessingState } from '../../types';
+import { AppStatus, InvoiceEntry, Project, ProcessingState, InvoiceData } from '../../types';
+import { clarityService, assessOCRQuality, ClarityScore, OCRQualityAssessment } from '../services/imageClarity';
 
 interface UseOCRBatchOptions {
   project: Project | null;
@@ -231,19 +232,42 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
       logger.info('QUEUE', `Processing item: ${item.id}`);
 
       try {
-        let processedFile = item.file;
-        if (item.file.type.startsWith('image/')) {
+        // ── Step 1：圖像清晰度評估（僅限 bitmap，PDF 跳過）──────────────────
+        // PDF 由 Gemini 自行渲染，canvas-based 清晰度評估無法處理 PDF。
+        let clarityScore: ClarityScore | null = null;
+        const isImageFile = item.file.type.startsWith('image/');
+
+        if (isImageFile) {
           try {
-            processedFile = await enhanceImageForOCR(item.file);
-            logger.info('PREPROCESSING', `Enhanced image: ${item.id}`);
+            clarityScore = await clarityService.assess(item.file);
+            logger.info('CLARITY', `${item.id}: clarity=${clarityScore?.clarity ?? 'null'}, confidence=${clarityScore?.confidence ?? 'N/A'}`);
           } catch (err) {
-            logger.warn('PREPROCESSING', `Failed to preprocess ${item.id}, using original`, err);
+            logger.warn('CLARITY', `Clarity assessment failed for ${item.id}, assuming blurry`, err);
+            clarityScore = { clarity: 'blurry', contrast: 0, laplacian: 0, confidence: 0 };
           }
         }
 
-        const base64 = await fileToBase64(processedFile);
+        // ── Step 2：預處理（條件式增強）────────────────────────────────────
+        // 清晰圖像直接送 Gemini，模糊圖像先做一次 Flash OCR 評估再決定。
+        // PDF 走原有流程（不增強）。
+        let processedFile = item.file;
+        let enhancementApplied = false;
+        let decisionReason = 'direct_flash';
+
+        if (isImageFile && clarityScore?.clarity === 'clear') {
+          // 清晰圖像：跳過增強，直接走後續流程
+          decisionReason = 'direct_flash';
+          logger.info('PREPROCESSING', `${item.id}: clear image, skip enhancement`);
+        } else if (isImageFile) {
+          // 模糊或無法評估：先用原圖跑 Flash，評估 OCR 質量，再決定要不要增強
+          decisionReason = 'quality_based';
+          // 實際增強與否在取得 Flash 結果後決定（見 Step 4）
+        }
+        // PDF 走原有 Gemini 自行渲染路徑，不做 canvas 增強
+
         const startTime = Date.now();
 
+        // ── Step 3：準備 ERP 期望值 ────────────────────────────────────────
         let expectedERP = undefined;
         if (project && project.erpData) {
           // 取出此憑證的「所有」ERP 行（同一個 voucher_id 可能有多行）
@@ -288,9 +312,108 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
           }
         }
 
+        // ── Step 4：Flash OCR → 評估品質 → 條件增強重跑 ──────────────────
+        // 模糊圖像策略：先跑 Flash 取得初步結果，評估 field_confidence 是否足夠。
+        // 若品質不足（shouldEnhance=true），增強原圖後重送（仍由 analyzeInvoice 內部決定升 Pro）。
+        // 注意：analyzeInvoice 內部已有 validation retry 和 auto-escalation，
+        // 這裡的增強是預處理層，不影響 Gemini 升級路徑，兩者不衝突。
+        let ocrQuality: OCRQualityAssessment | null = null;
+
+        if (isImageFile && clarityScore?.clarity !== 'clear') {
+          // 先用原圖跑 Flash（若模型是 Pro，就直接送 Pro；Flash 語意在此指「不做增強的初始嘗試」）
+          const base64Flash = await fileToBase64(item.file);
+          const flashResults = await analyzeInvoice(base64Flash, item.file.type, selectedModel, 0, knownSellersFromExcel, expectedERP);
+
+          if (flashResults && flashResults.length > 0) {
+            // 評估第一筆結果的 OCR 質量（multi-invoice 文件以第一筆為代表）
+            try {
+              ocrQuality = await assessOCRQuality(flashResults[0]);
+            } catch (err) {
+              logger.warn('QUALITY', `OCR quality assessment failed for ${item.id}`, err);
+            }
+
+            if (!ocrQuality?.shouldEnhance) {
+              // Flash 質量足夠，直接用
+              logger.info('CLARITY', `${item.id}: Flash quality OK (${ocrQuality?.keyFieldsConfidence ?? '?'}%), skip enhancement`);
+              decisionReason = 'quality_based_flash_ok';
+
+              // 記錄決策到 trace_logs
+              const clarityLog = `[Clarity] ${item.id}: clarity=${clarityScore?.clarity ?? 'unknown'}, Flash quality=${ocrQuality?.keyFieldsConfidence ?? '?'}%, no enhancement needed`;
+              flashResults.forEach(res => {
+                res.trace_logs = [clarityLog, ...(res.trace_logs || [])];
+              });
+
+              // 進入重複發票檢查
+              flashResults.forEach(res => {
+                const normNo = (res.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
+                if (normNo) {
+                  if (seenInvoiceNumbers.has(normNo)) {
+                    res.trace_logs = res.trace_logs || [];
+                    res.trace_logs.push(`[System Warning] Duplicate Invoice Number Detected: ${res.invoice_number}`);
+                  } else {
+                    seenInvoiceNumbers.add(normNo);
+                  }
+                }
+              });
+
+              const duration = Date.now() - startTime;
+              logger.info('API', `Success (clarity-flash): ${item.id}`, { duration, invoiceCount: flashResults.length, clarityScore, ocrQuality });
+              changesMap.set(item.id, { status: 'SUCCESS', data: flashResults });
+              return; // 跳出 try，進入 finally
+            }
+
+            // Flash 質量不足，增強後重跑
+            logger.info('CLARITY', `${item.id}: Flash quality insufficient (${ocrQuality?.keyFieldsConfidence ?? '?'}%, failed: ${ocrQuality?.failedFields?.join(',') ?? '-'}), applying enhancement`);
+            decisionReason = 'quality_based_enhanced';
+
+            try {
+              processedFile = await enhanceImageForOCR(item.file);
+              enhancementApplied = true;
+              logger.info('PREPROCESSING', `Enhanced image for retry: ${item.id}`);
+            } catch (enhErr) {
+              logger.warn('PREPROCESSING', `Enhancement failed for ${item.id}, falling back to Flash result`, enhErr);
+              // 增強失敗：用原始 Flash 結果作為 fallback
+              const fallbackLog = `[Clarity] ${item.id}: enhancement failed, using Flash result as fallback`;
+              flashResults.forEach(res => {
+                res.trace_logs = [fallbackLog, ...(res.trace_logs || [])];
+              });
+              flashResults.forEach(res => {
+                const normNo = (res.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
+                if (normNo) {
+                  if (seenInvoiceNumbers.has(normNo)) {
+                    res.trace_logs = res.trace_logs || [];
+                    res.trace_logs.push(`[System Warning] Duplicate Invoice Number Detected: ${res.invoice_number}`);
+                  } else {
+                    seenInvoiceNumbers.add(normNo);
+                  }
+                }
+              });
+              const duration = Date.now() - startTime;
+              logger.info('API', `Success (clarity-flash-fallback): ${item.id}`, { duration, invoiceCount: flashResults.length });
+              changesMap.set(item.id, { status: 'SUCCESS', data: flashResults });
+              return;
+            }
+          }
+          // flashResults 為空：繼續往下走，用增強後圖像重跑（processedFile 還是 item.file）
+        } else if (!isImageFile) {
+          // PDF 或其他非圖像：原有流程，不做清晰度增強
+          processedFile = item.file;
+        }
+        // else: 清晰圖像，processedFile = item.file（直接送）
+
+        const base64 = await fileToBase64(processedFile);
+
         const results = await analyzeInvoice(base64, processedFile.type, selectedModel, 0, knownSellersFromExcel, expectedERP);
 
         if (results && results.length > 0) {
+          // 記錄清晰度決策到 trace_logs
+          if (clarityScore !== null || enhancementApplied) {
+            const clarityLog = `[Clarity] decision=${decisionReason}, clarity=${clarityScore?.clarity ?? 'N/A'}, confidence=${clarityScore?.confidence ?? 'N/A'}, enhanced=${enhancementApplied}`;
+            results.forEach(res => {
+              res.trace_logs = [clarityLog, ...(res.trace_logs || [])];
+            });
+          }
+
           results.forEach(res => {
             const normNo = (res.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
             if (normNo) {
@@ -304,7 +427,7 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
           });
 
           const duration = Date.now() - startTime;
-          logger.info('API', `Success: ${item.id}`, { duration, invoiceCount: results.length });
+          logger.info('API', `Success: ${item.id}`, { duration, invoiceCount: results.length, clarityScore, enhancementApplied, decisionReason });
           changesMap.set(item.id, { status: 'SUCCESS', data: results });
         } else {
           logger.warn('API', `Empty Result: ${item.id}`, { duration: Date.now() - startTime });

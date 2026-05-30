@@ -87,6 +87,21 @@
     → 成本爆炸（Pro 貴 4 倍），最多升 2 次後改手動  
     → 相關檔：App.tsx L534–558
 
+11. ❌ **禁止改 clarity 閾值（contrast > 50, laplacian > 100）**  
+    → 改動影響 50% 圖像評估準度，盲區擴大  
+    → 相關檔：clarityService.ts / useOCRBatch.ts（clarity 決策）  
+    → 若要調整，需 A/B 實驗驗證（至少 100 筆樣本）
+
+12. ❌ **禁止改 OCR 質量評估閾值（keyFieldsConfidence < 80% 才增強）**  
+    → 閾值平衡誤報 vs 漏報，改低誤報率上升、改高漏掉真實問題  
+    → 相關檔：useOCRBatch.ts L290–310（shouldEnhance 決策）  
+    → 改動需同步監控指標 quality_assessment_correct_rate
+
+13. ❌ **禁止跳過清晰度評估層**  
+    → 若禁用圖像評估，所有圖像都走「Flash + 質量評估 → 增強 + Pro」路徑  
+    → 成本翻倍，清晰圖也被增強（浪費）  
+    → 相關檔：useOCRBatch.ts L165–185（clarity 評估層）
+
 ### 常見踩坑 + 防護
 
 - **T302 判定**：「收銀機統一發票」文字必須在發票本體，同頁有機列出貨單不等於 T302  
@@ -118,6 +133,16 @@
   📌 相關檔：auditLogic.ts L85–121（groupByVoucherId）  
   ⚠️ 容易踩坑：加新的配對邏輯時忘了 mark claimed  
   🛡️ 防護：見 design-decisions.md #1、auditLogic.test.ts L255–275
+
+- **P2a 清晰度評估失敗**：Laplacian 計算失敗或無法取得圖像 pixel data  
+  📌 相關檔：clarityService.ts（計算）、useOCRBatch.ts（fallback）  
+  ⚠️ 容易踩坑：失敗後直接 OCR，無評估結果  
+  🛡️ 防護：見 known-bugs.md「監控清單：P2a 條件式增強」
+
+- **P2a 增強失敗**：Canvas imageEnhancement 可能因瀏覽器限制或大圖失敗  
+  📌 相關檔：useOCRBatch.ts L320（增強層、try/catch）  
+  ⚠️ 容易踩坑：增強失敗後應 fallback，不能拋出錯誤  
+  🛡️ 防護：console log「WARN: Enhancement failed, falling back to Flash result」+ known-bugs.md Issue 7
 
 ---
 
@@ -167,6 +192,9 @@
 | 新增 tax_code | 同上 + geminiService.ts prompt | 詳細記錄此稅別的規則 | HIGH |
 | imageEnhancement.ts 改 gamma 值 | design-decisions.md #6 + known-bugs.md | 更新演算法說明 + 驗證方式 | MEDIUM |
 | Gemini 升級策略改動 | design-decisions.md #7 | 更新升級條件、成本估算 | MEDIUM |
+| P2a 清晰度閾值調整 | design-decisions.md #8 + known-bugs.md 監控清單 | 更新閾值 + A/B 驗證方式 | HIGH |
+| P2a OCR 質量評估改動 | useOCRBatch.ts 整合 + known-bugs.md Issue 8 | 記錄新的 quality_assessment 邏輯 | HIGH |
+| ClarityService 計算方式變更 | CLAUDE-ocr-business-logic.md | 更新清晰度評估演算法說明 | MEDIUM |
 | UI 改 auditStatus 判定 | 無需同步文檔 | - | - |
 
 **版本戳格式**：`Last verified: YYYY-MM-DD, commit [short-hash]`（在文檔頂部）

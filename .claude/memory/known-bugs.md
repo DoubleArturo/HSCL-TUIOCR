@@ -6,7 +6,7 @@ type: project
 
 # 已知問題與邊界情況
 
-> 最後更新：2026-05-26, commit 2413516
+> 最後更新：2026-05-30, commit (P2a 整合完成)
 
 ## Issue 1：XW17220651 淡墨發票無法辨識
 
@@ -299,6 +299,143 @@ invoice_number 完全 miss（matchedOCRInvoices = []）
   4. ✓ shouldSkipFromAudit(ZH...) = false（T301 不跳過）
   5. ✓ fallback 邏輯：matchedOCRInvoices.length = 0，用 ZH... 比對
   - 結果：應記錄 inv_no + amount + tax_code + tax_id diffs（4 個）
+
+---
+
+## Issue 9：PDF 多頁無法進行清晰度評估
+
+**症狀**  
+- 多頁 PDF（如 G12-Q50007.pdf 含 5 頁）
+- 無法對每一頁單獨評估清晰度
+- 若跳過清晰度評估，直接進入「Flash + 質量評估 → 增強 + Pro」，成本翻倍
+
+**根因**  
+PDF 轉 Canvas 時，多頁影像堆疊或裁剪，無法單獨分析每頁品質。
+
+**設計決策**  
+PDF 多頁跳過清晰度評估，由 Gemini 的「多發票隔離」規則自行處理。
+
+相關檔：`useOCRBatch.ts` L165–180（PDF 檢測）
+
+**改動風險**  
+⚠️ **驗證**：PDF 判定邏輯是否準確？（應該檢查 `file.type.includes('pdf')` 或 `filename.endsWith('.pdf')`）
+
+---
+
+## Issue 10：Canvas 增強失敗的 fallback
+
+**症狀**  
+- 大圖檔（> 100MB）或特殊色彩空間的 PDF
+- Canvas imageEnhancement 可能因瀏覽器限制而失敗（如 Chrome 單張圖限制 512MB）
+- 若增強失敗但沒有 fallback，會拋出異常
+
+**設計決策**  
+useOCRBatch 的 Layer 3 增強應該 try/catch：
+- 增強成功 → 用增強後的圖送 Pro
+- 增強失敗 → fallback 回 Flash 結果，記 warning log
+
+相關檔：`useOCRBatch.ts` L320–335（try/catch）
+
+**改動風險**  
+❌ **禁止**讓增強異常炸出，應該 graceful fallback
+
+**驗證**  
+console 應該看到：`WARN: Enhancement failed for file.pdf, falling back to Flash result`
+
+---
+
+## 監控清單：P2a 條件式增強
+
+線上監控以下指標，若超過告警門檻立即介入。
+
+### 指標 1：清晰度評估準度
+- **定義**：`clarity_correct_rate = (清晰度評估 == 實際需要增強) / 總樣本`
+- **計算方式**：
+  - 清晰度 = 'clear'，後續 OCR 成功率高（無需增強）→ ✓ 正確
+  - 清晰度 = 'blurry'，OCR 品質低於閾值（需增強）→ ✓ 正確
+  - 清晰度 = 'clear'，但 OCR 失敗 → ✗ 誤判（假陰性）
+  - 清晰度 = 'blurry'，但 OCR 成功高信心 → ✗ 誤判（假陽性）
+- **目標**：> 90%（< 10% 誤判）
+- **監控頻率**：每日統計
+- **告警門檻**：誤判率 > 15% → 檢查圖像品質分佈變化（可能掃描件集合改變）
+- **根因分析**：若假陰性率升高 → Laplacian 閾值過高；若假陽性率升高 → 格線誤判
+- **相關檔**：`clarityService.ts`（threshold）、`useOCRBatch.ts`（trace_log.clarity_score）
+
+### 指標 2：OCR 質量評估準度
+- **定義**：`quality_assessment_correct_rate = (shouldEnhance 判定 == 實際需增強) / 總樣本`
+- **計算方式**：
+  - keyFieldsConfidence ≥ 80%，Flash 結果無誤 → ✓ 不需增強
+  - keyFieldsConfidence < 80%，Pro 提升信心度 → ✓ 需增強
+  - keyFieldsConfidence ≥ 80%，但實際有誤 → ✗ 誤判（誤報）
+  - keyFieldsConfidence < 80%，但 Flash 結果夠用 → ✗ 誤判（漏報）
+- **目標**：> 85%
+- **監控頻率**：每日統計
+- **告警門檻**：錯誤判定率 > 20% → 調整 keyFieldsConfidence 閾值（80% → 75% or 85%）
+- **相關檔**：`useOCRBatch.ts` L290–310（shouldEnhance 邏輯）、`validateConfidenceScore()`
+
+### 指標 3：增強成本效益（ROI）
+- **定義**：`enhancement_roi = (Pro 成功解決的案例 / 總增強次數) × (Flash_cost / Pro_cost)`
+- **計算方式**：
+  - 共增強 100 次（Flash 失敗 → Pro）
+  - Pro 中有 80 次成功提升精度、20 次仍失敗
+  - ROI = (80 / 100) × (0.001 / 0.03) ≈ 0.27（**太低，應優化**）
+  - 目標 ROI = `(成功率) × (成本比)`，希望 > 2.0（投入 1 元 Pro，解決 2 個原本 Flash 失敗）
+- **計算實例**：
+  - Flash 成本 ≈ $0.001 / 張
+  - Pro 成本 ≈ $0.03 / 張
+  - 成本比 = 0.001 / 0.03 ≈ 0.033
+  - 若 Pro 成功率 60%，ROI = 0.60 × 0.033 ≈ 0.02（不划算）
+  - 需要 Pro 成功率 > 60% 才值得（通常應該 > 80%）
+- **監控頻率**：每週統計
+- **告警門檻**：ROI < 1.5 → 考慮調整增強條件或提升 Gemini 模型
+- **相關檔**：trace_log 中的 `enhancement_decision`, `enhancement_applied`, `post_enhancement_confidence`
+
+### 指標 4：各層成本分佈
+- **Layer 1 占比**：clarity = 'clear' 的比例（應該佔 50–70%，節省成本）
+- **Layer 2 占比**：clarity = 'blurry' 但 Flash 成功的比例（應該佔 20–40%）
+- **Layer 3 占比**：需增強 + Pro 的比例（應該 < 20%）
+- **監控實例**：
+  | Layer | 占比 | 成本 | 累計成本 |
+  |-------|------|------|--------|
+  | 1（clear） | 60% | 0.001 × 0.6 = $0.0006 | $0.0006 |
+  | 2（blurry 但 Flash OK） | 30% | 0.001 × 0.3 = $0.0003 | $0.0009 |
+  | 3（增強 + Pro） | 10% | (0.001 + 0.03) × 0.1 = $0.0031 | $0.0040 |
+  | **平均** | 100% | - | **$0.0040 / 張** |
+
+- **目標分佈**：Layer 1 ≥ 50%, Layer 3 ≤ 20%
+- **監控頻率**：每週統計分佈圖
+
+---
+
+## 已知邊界情況（P2a）
+
+### 邊界 1：Laplacian 對格線掃描件誤判
+- **症狀**：清晰的帳單格線被評為 'blurry'（格線視作「低銳度」）
+- **發生率**：~5% 的掃描件（特別是 A4 帳單含格線）
+- **暫時解決**：監控並接受此誤判（假陽性）
+  - 這只會導致「額外送 Flash 評估」，不會破壞最終結果
+  - 若要完全解決，需加「格線檢測」（Hough 線檢測或 edge detection），成本較高
+- **長期改進**：可在後續版本加可選的「格線檢測跳過」模式
+
+### 邊界 2：Gemini field_confidence 有誤差
+- **症狀**：Flash 返回高信心度但實際有誤；或低信心度但結果正確
+- **誤差範圍**：±10%（經驗值，無官方文檔）
+- **緩解方式**：
+  1. 用 `validateConfidenceScore()` 做格式驗證（如發票號長度、統編位數）
+  2. 監控 quality_assessment_correct_rate，若準度下降 → 提升閾值
+- **相關檔**：`validationPipeline.ts`（validateConfidenceScore）
+
+### 邊界 3：PDF 多頁的成本爆炸
+- **症狀**：多頁 PDF（5 頁）若每頁都需增強，成本 = 5×(Flash + Pro) = $0.155 / 檔
+- **改進**：
+  1. PDF 進入時直接判 `skipClarity = true`，進入「Flash 質量評估」
+  2. 若質量不佳，增強時只增強失敗的頁面（partial enhancement）
+- **相關檔**：`useOCRBatch.ts` L165–180（PDF 檢測）
+
+### 邊界 4：大圖增強失敗導致異常
+- **症狀**：Canvas 無法載入 > 100MB 的圖，或某些色彩空間不支援
+- **防護**：try/catch，記 warning log，graceful fallback
+- **相關檔**：`useOCRBatch.ts` L320–335
 
 ---
 

@@ -419,9 +419,89 @@ async function postProcessItems(
       logs.push(`[Registry] Recorded unknown voucher_type: "${item.voucher_type}"`);
     }
 
+    // --- f) 信心度格式驗證 + 補預設值 ---
+    normalizeFieldConfidence(item);
+    logs.push(`[Confidence] Normalized field_confidence: inv=${item.field_confidence!.invoice_number.toFixed(2)} seller=${item.field_confidence!.seller_tax_id.toFixed(2)} total=${item.field_confidence!.amount_total.toFixed(2)}`);
+
     item.trace_logs = logs;
     return item;
   }));
+}
+
+/**
+ * 驗證 Gemini 回傳的 confidence 分數是否與格式現實相符。
+ * 若欄位值不符合格式正則，自動乘上懲罰係數（0.8）；
+ * 特殊邊界情況（金額 = 0）上限壓到 0.5。
+ * 若 Gemini 未回傳 confidence，預設保守值 0.7。
+ */
+function validateConfidenceScore(
+  ocrValue: string | number | null | undefined,
+  geminiConfidence: number | undefined,
+  field: string
+): number {
+  const base = typeof geminiConfidence === 'number' ? Math.max(0, Math.min(1, geminiConfidence)) : 0.7;
+
+  const formatChecks: Record<string, RegExp> = {
+    invoice_number: /^[A-Z]{2}\d{8}$/,
+    seller_tax_id: /^\d{8}$/,
+    buyer_tax_id:  /^\d{8}$/,
+    amount_sales:  /^\d+$/,
+    amount_tax:    /^\d+$/,
+    amount_total:  /^\d+$/,
+    invoice_date:  /^\d{4}\/\d{2}\/\d{2}$/,
+    tax_code:      /^T\d{3}$|^TXXX$/,
+  };
+
+  if (ocrValue === null || ocrValue === undefined || ocrValue === '') {
+    // 值缺失 → 直接壓 0.5
+    return Math.min(base, 0.5);
+  }
+
+  const valueStr = String(ocrValue);
+  const regex = formatChecks[field];
+  if (regex && !regex.test(valueStr)) {
+    // 格式不合 → 扣 20%
+    return base * 0.8;
+  }
+
+  // 金額欄位值為 0 永遠存疑
+  if (['amount_sales', 'amount_tax', 'amount_total'].includes(field) && Number(ocrValue) === 0) {
+    return Math.min(base, 0.5);
+  }
+
+  return base;
+}
+
+/**
+ * 確保 field_confidence 每個欄位都存在，並套用格式驗證懲罰。
+ * 若 Gemini 未回傳某欄位的 confidence，填入保守預設值 0.7 後再驗證。
+ */
+function normalizeFieldConfidence(item: InvoiceData): void {
+  if (!item.field_confidence) {
+    item.field_confidence = {
+      invoice_number: 0.7,
+      invoice_date: 0.7,
+      seller_name: 0.7,
+      seller_tax_id: 0.7,
+      currency: 0.7,
+      amount_sales: 0.7,
+      amount_tax: 0.7,
+      amount_total: 0.7,
+    };
+  }
+
+  const fc = item.field_confidence;
+
+  // 對每個關鍵欄位套用格式驗證後重新賦值
+  fc.invoice_number = validateConfidenceScore(item.invoice_number, fc.invoice_number, 'invoice_number');
+  fc.invoice_date   = validateConfidenceScore(item.invoice_date,   fc.invoice_date,   'invoice_date');
+  fc.seller_tax_id  = validateConfidenceScore(item.seller_tax_id,  fc.seller_tax_id,  'seller_tax_id');
+  fc.amount_sales   = validateConfidenceScore(item.amount_sales,   fc.amount_sales,   'amount_sales');
+  fc.amount_tax     = validateConfidenceScore(item.amount_tax,     fc.amount_tax,     'amount_tax');
+  fc.amount_total   = validateConfidenceScore(item.amount_total,   fc.amount_total,   'amount_total');
+  // seller_name / currency 只補預設值，不做格式正則（自由文字）
+  fc.seller_name = typeof fc.seller_name === 'number' ? fc.seller_name : 0.7;
+  fc.currency    = typeof fc.currency    === 'number' ? fc.currency    : 0.7;
 }
 
 function deduplicateResults(results: InvoiceData[]): InvoiceData[] {
