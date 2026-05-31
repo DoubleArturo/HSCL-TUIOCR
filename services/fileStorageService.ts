@@ -94,6 +94,24 @@ export const fileStorageService = {
         });
     },
 
+    // Try IndexedDB first; if missing, download from Supabase Storage and cache locally
+    async getFileWithCloudFallback(invoiceId: string, storagePath?: string): Promise<File | null> {
+        const local = await this.getFile(invoiceId);
+        if (local) return local;
+        if (!storagePath) return null;
+        try {
+            const { downloadInvoiceFile } = await import('./supabaseService');
+            const cloudFile = await downloadInvoiceFile(storagePath);
+            if (cloudFile) {
+                await this.saveFile(invoiceId, cloudFile); // cache locally
+                return cloudFile;
+            }
+        } catch (e) {
+            console.warn('[Storage] cloud fallback failed:', e);
+        }
+        return null;
+    },
+
     /**
      * Delete files older than maxAgeMs
      * Default: 30 days (30 * 24 * 60 * 60 * 1000)

@@ -2,6 +2,13 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import type { Project, ProjectMeta, InvoiceEntry, ERPRecord } from '../../types';
 import { fileStorageService } from '../../services/fileStorageService';
 import { logger } from '../../services/loggerService';
+import {
+  fetchCloudProjects,
+  fetchCloudProject,
+  saveProjectToCloud,
+  deleteCloudProject,
+  uploadInvoiceFile,
+} from '../../services/supabaseService';
 
 function serializeProject(proj: Project): object {
   return {
@@ -15,7 +22,7 @@ function serializeProject(proj: Project): object {
   };
 }
 
-export function useProject() {
+export function useProject(userId?: string) {
   const [projectList, setProjectList] = useState<ProjectMeta[]>([]);
   const [project, setProject] = useState<Project | null>(null);
 
@@ -27,11 +34,23 @@ export function useProject() {
     if (project) isDirtyRef.current = true;
   }, [project]);
 
-  // Load project list + setup auto-save
+  // Load project list (cloud if logged in, else localStorage)
   useEffect(() => {
-    const stored = localStorage.getItem('project_list');
-    if (stored) setProjectList(JSON.parse(stored));
+    if (userId) {
+      fetchCloudProjects(userId).then(cloudList => {
+        setProjectList(cloudList);
+        localStorage.setItem('project_list', JSON.stringify(cloudList));
+      }).catch(() => {
+        // Network error: fall back to localStorage cache
+        const stored = localStorage.getItem('project_list');
+        if (stored) setProjectList(JSON.parse(stored));
+      });
+    } else {
+      const stored = localStorage.getItem('project_list');
+      if (stored) setProjectList(JSON.parse(stored));
+    }
 
+    // Auto-save interval (10s)
     const interval = setInterval(() => {
       if (isDirtyRef.current && latestProjectRef.current) {
         saveSnapshot(latestProjectRef.current);
@@ -39,37 +58,40 @@ export function useProject() {
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveSnapshot = useCallback((proj: Project) => {
+    // 1. localStorage (always, as local cache)
     const serializable = serializeProject(proj);
     localStorage.setItem(`project_${proj.id}`, JSON.stringify(serializable));
     setProjectList(prev => {
       const meta: ProjectMeta = {
-        id: proj.id,
-        name: proj.name,
+        id: proj.id, name: proj.name,
         updatedAt: new Date().toISOString(),
         invoiceCount: proj.invoices.length,
         erpCount: proj.erpData.length,
-        year: proj.year,
-        month: proj.month,
+        year: proj.year, month: proj.month,
       };
       const updated = [meta, ...prev.filter(p => p.id !== proj.id)];
       localStorage.setItem('project_list', JSON.stringify(updated));
       return updated;
     });
-  }, []);
+
+    // 2. Cloud sync (non-blocking, best-effort)
+    if (userId) {
+      saveProjectToCloud(userId, proj).catch(e =>
+        console.warn('[Cloud] auto-save failed:', e)
+      );
+    }
+  }, [userId]);
 
   const createProject = useCallback((name: string, year?: number, month?: number) => {
     const newProj: Project = {
       id: `proj_${Date.now()}`,
-      name,
-      invoices: [],
-      erpData: [],
+      name, invoices: [], erpData: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      year,
-      month,
+      year, month,
     };
     setProject(newProj);
     saveSnapshot(newProj);
@@ -80,6 +102,37 @@ export function useProject() {
     id: string,
     onError?: (invId: string, err: any) => void,
   ): Promise<boolean> => {
+    // Try cloud first (if logged in)
+    if (userId) {
+      try {
+        const cloudProject = await fetchCloudProject(userId, id);
+        if (cloudProject) {
+          setProject(cloudProject);
+
+          // Rehydrate files: IndexedDB cache → Supabase Storage fallback
+          const updated = await Promise.all(cloudProject.invoices.map(async (inv) => {
+            try {
+              const file = await fileStorageService.getFileWithCloudFallback(inv.id, inv.storagePath);
+              if (file) return { ...inv, file, previewUrl: URL.createObjectURL(file) };
+            } catch (err: any) {
+              logger.error('FILE', `Load failed for ${inv.id}`, err);
+              onError?.(inv.id, err);
+            }
+            return inv;
+          }));
+          setProject(prev => prev ? { ...prev, invoices: updated } : null);
+
+          // Sync to localStorage cache
+          const serializable = serializeProject({ ...cloudProject, invoices: updated });
+          localStorage.setItem(`project_${id}`, JSON.stringify(serializable));
+          return true;
+        }
+      } catch (e) {
+        console.warn('[Cloud] loadProject failed, falling back to localStorage:', e);
+      }
+    }
+
+    // Fall back to localStorage
     const data = localStorage.getItem(`project_${id}`);
     if (!data) return false;
 
@@ -105,7 +158,7 @@ export function useProject() {
     }));
     setProject(prev => prev ? { ...prev, invoices: updated } : null);
     return true;
-  }, []);
+  }, [userId]);
 
   const updateProjectMeta = useCallback((id: string, name: string, year: number, month: number) => {
     setProjectList(prev => {
@@ -128,7 +181,12 @@ export function useProject() {
       localStorage.setItem('project_list', JSON.stringify(updated));
       return updated;
     });
-  }, []);
+    if (userId) {
+      deleteCloudProject(userId, id).catch(e =>
+        console.warn('[Cloud] deleteProject failed:', e)
+      );
+    }
+  }, [userId]);
 
   const updateInvoices = useCallback((updater: (prev: InvoiceEntry[]) => InvoiceEntry[]) => {
     setProject(prev => prev ? { ...prev, invoices: updater(prev.invoices) } : null);
@@ -156,6 +214,27 @@ export function useProject() {
     });
   }, []);
 
+  // Upload invoice file to Supabase Storage in the background
+  const syncFileToCloud = useCallback(async (projectId: string, invoiceId: string, file: File) => {
+    if (!userId) return;
+    try {
+      const storagePath = await uploadInvoiceFile(userId, projectId, invoiceId, file);
+      if (storagePath) {
+        setProject(prev => {
+          if (!prev) return null;
+          return {
+            ...prev,
+            invoices: prev.invoices.map(inv =>
+              inv.id === invoiceId ? { ...inv, storagePath } : inv
+            ),
+          };
+        });
+      }
+    } catch (e) {
+      console.warn('[Cloud] syncFileToCloud failed:', e);
+    }
+  }, [userId]);
+
   return {
     projectList,
     project,
@@ -168,5 +247,6 @@ export function useProject() {
     updateERP,
     toggleErpFlag,
     updateProjectMeta,
+    syncFileToCloud,
   };
 }
