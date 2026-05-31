@@ -141,3 +141,19 @@ export function autoCorrectAmounts(item: InvoiceData): { corrected: boolean; log
 
   return { corrected: false, log: '' };
 }
+
+/**
+ * Rule 2c null guard: T300/三聯手寫 invoices should have buyer_tax_id.
+ * When Gemini returns null due to poor scan quality, convert to '?' so
+ * downstream flagging works instead of silently receiving null.
+ */
+export function normalizeBuyerTaxId(
+  buyerTaxId: string | null | undefined,
+  taxCode: string | null,
+  voucherType?: string | null
+): string | null | undefined {
+  if (buyerTaxId == null && (taxCode === 'T300' || voucherType === '三聯手寫')) {
+    return '?';
+  }
+  return buyerTaxId;
+}

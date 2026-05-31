@@ -9,7 +9,7 @@ import { PROMPT_T302 } from './prompts/T302';
 import { PROMPT_T500 } from './prompts/T500';
 import { PROMPT_TXXX } from './prompts/TXXX';
 import { buildUnknownTypePrompt } from './prompts/unknown';
-import { validateInvoice, autoCorrectAmounts } from './validationPipeline';
+import { validateInvoice, autoCorrectAmounts, normalizeBuyerTaxId } from './validationPipeline';
 import { recordUnknownType, getRegistry, isKnownType } from './documentRegistry';
 
 // Define process for Vite environment to avoid TS errors
@@ -371,6 +371,17 @@ async function postProcessItems(
 
     // Rule 2c: Validate buyer_tax_id
     const EXPECTED_BUYER_TAX_IDS = ['16547744'];
+
+    // Null guard: T300/三聯手寫 null → '?' so downstream flagging works (known-bugs.md Issue 6)
+    const normalizedBuyerTaxId = normalizeBuyerTaxId(item.buyer_tax_id, item.tax_code, item.voucher_type);
+    if (normalizedBuyerTaxId !== item.buyer_tax_id) {
+      item.buyer_tax_id = normalizedBuyerTaxId as string;
+      if (!item.verification.flagged_fields.includes('buyer_tax_id')) {
+        item.verification.flagged_fields.push('buyer_tax_id');
+      }
+      logs.push(`Rule 2c: buyer_tax_id null on T300/三聯手寫 — converted to '?' placeholder`);
+    }
+
     if (item.buyer_tax_id) {
       if (item.buyer_tax_id.includes('?')) {
         if (!item.verification.flagged_fields.includes('buyer_tax_id')) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateInvoice, buildCorrectionPrompt, autoCorrectAmounts } from './validationPipeline';
+import { validateInvoice, buildCorrectionPrompt, autoCorrectAmounts, normalizeBuyerTaxId } from './validationPipeline';
 import type { InvoiceData } from '../types';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
@@ -272,5 +272,37 @@ describe('autoCorrectAmounts()', () => {
       const result = autoCorrectAmounts(item);
       expect(result.corrected).toBe(false);
     });
+  });
+});
+
+// ─── normalizeBuyerTaxId ────────────────────────────────────────────────────
+
+describe('normalizeBuyerTaxId()', () => {
+  it('T300 + null → ? (scan quality poor, placeholder needed)', () => {
+    expect(normalizeBuyerTaxId(null, 'T300', undefined)).toBe('?');
+  });
+
+  it('三聯手寫 voucher_type + null → ? (even without explicit tax_code)', () => {
+    expect(normalizeBuyerTaxId(null, null, '三聯手寫')).toBe('?');
+  });
+
+  it('非 T300 + null → null unchanged (收據/TXXX 無 buyer_tax_id 是正常的)', () => {
+    expect(normalizeBuyerTaxId(null, 'TXXX', '收據')).toBeNull();
+  });
+
+  it('T302 + null → null unchanged (三聯收銀不強制要求 buyer_tax_id)', () => {
+    expect(normalizeBuyerTaxId(null, 'T302', '三聯收銀')).toBeNull();
+  });
+
+  it('T300 + 有值 → 值不變', () => {
+    expect(normalizeBuyerTaxId('12345678', 'T300', '三聯手寫')).toBe('12345678');
+  });
+
+  it('T300 + ? → 值不變（已是 placeholder，不重複轉換）', () => {
+    expect(normalizeBuyerTaxId('165?7744', 'T300', '三聯手寫')).toBe('165?7744');
+  });
+
+  it('undefined 視同 null：T300 + undefined → ?', () => {
+    expect(normalizeBuyerTaxId(undefined, 'T300', '三聯手寫')).toBe('?');
   });
 });
