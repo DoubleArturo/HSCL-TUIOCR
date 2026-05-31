@@ -38,8 +38,19 @@ export function useProject(userId?: string) {
   useEffect(() => {
     if (userId) {
       fetchCloudProjects(userId).then(cloudList => {
-        setProjectList(cloudList);
-        localStorage.setItem('project_list', JSON.stringify(cloudList));
+        if (cloudList.length > 0) {
+          // Cloud has data — it's the source of truth
+          setProjectList(cloudList);
+          localStorage.setItem('project_list', JSON.stringify(cloudList));
+        } else {
+          // Cloud is empty (first login or no cloud projects yet).
+          // Fall back to any existing localStorage data so the user still
+          // sees their locally-cached projects.
+          const stored = localStorage.getItem('project_list');
+          if (stored) {
+            try { setProjectList(JSON.parse(stored)); } catch { /* ignore */ }
+          }
+        }
       }).catch(() => {
         // Network error: fall back to localStorage cache
         const stored = localStorage.getItem('project_list');
