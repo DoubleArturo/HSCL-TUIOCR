@@ -383,6 +383,66 @@ describe('computeAuditRows - TXXX skipping', () => {
     expect(rows[0].diffDetails).toHaveLength(0);
   });
 
+  it('TXXX ERP row must not show another invoice\'s OCR data as display (G12-Q50026 pattern)', () => {
+    // In a voucher with two ERP rows (T301 + TXXX receipt), TXXX row's display
+    // must not steal the T301 invoice's OCR data. ocr should be null.
+    const t301OCR = makeOCR({
+      invoice_number: 'YL06030291',
+      tax_code: 'T301',
+      amount_total: 516,
+      seller_tax_id: '06030291',
+    });
+    const entry: InvoiceEntry = {
+      id: 'G12-Q50026',
+      file: new File([], 'G12-Q50026.pdf') as any,
+      previewUrl: '',
+      status: 'SUCCESS',
+      data: [t301OCR],
+    };
+    const erpT301 = makeERP({
+      voucher_id: 'G12-Q50026',
+      tax_code: 'T301',
+      invoice_numbers: ['YL06030291'],
+      amount_total: 516,
+    });
+    const erpTXXX = makeERP({
+      voucher_id: 'G12-Q50026',
+      tax_code: 'TXXX',
+      invoice_numbers: [],
+      amount_total: 53,
+    });
+
+    const rows = computeAuditRows([erpT301, erpTXXX], [entry]);
+    const txxxRow = rows.find(r => r.erp?.tax_code === 'TXXX');
+
+    expect(txxxRow?.auditStatus).toBe('SKIPPED');
+    expect(txxxRow?.ocr).toBeNull();
+  });
+
+  it('unmatched ERP row must not display another row\'s already-claimed OCR (G61-Q50027 pattern)', () => {
+    // Row 1 claims XV44523109. Row 2 has XV44523110 (not in OCR).
+    // Row 2's displayOCR must NOT show XV44523109's data.
+    const ocr1 = makeOCR({ invoice_number: 'XV44523109', amount_total: 211034, seller_tax_id: '44523109' });
+    const ocr3 = makeOCR({ invoice_number: 'ZX44455900', amount_total: 114560, seller_tax_id: '44455900' });
+    const entry: InvoiceEntry = {
+      id: 'G61-Q50027',
+      file: new File([], 'G61-Q50027.pdf') as any,
+      previewUrl: '',
+      status: 'SUCCESS',
+      data: [ocr1, ocr3],
+    };
+    const erp1 = makeERP({ voucher_id: 'G61-Q50027', invoice_numbers: ['XV44523109'], amount_total: 211034 });
+    const erp2 = makeERP({ voucher_id: 'G61-Q50027', invoice_numbers: ['XV44523110'], amount_total: 21394 });
+    const erp3 = makeERP({ voucher_id: 'G61-Q50027', invoice_numbers: ['ZX44455900'], amount_total: 114560 });
+
+    const rows = computeAuditRows([erp1, erp2, erp3], [entry]);
+    const row2 = rows.find(r => r.erp?.invoice_numbers?.includes('XV44523110'));
+
+    expect(row2?.auditStatus).toBe('MISMATCH');
+    // displayOCR must NOT be XV44523109 (already claimed by row 1)
+    expect(row2?.ocr?.invoice_number).not.toBe('XV44523109');
+  });
+
   it('OCR with tax_code=TXXX should be skipped from audit diffs', () => {
     const txxx = makeOCR({ tax_code: 'TXXX', seller_tax_id: '99999999' });
     const rows = computeAuditRows(

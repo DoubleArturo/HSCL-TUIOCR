@@ -277,9 +277,13 @@ export function computeAuditRows(
           amount_tax: valid.reduce((s, i) => s + (i.amount_tax || 0), 0),
           invoice_number: invoiceNumbers,
         };
-      } else if (allOCRInvoices.length > 0) {
-        const fallback = allOCRInvoices.find(i => isInvoiceDoc(i)) || allOCRInvoices[0];
-        displayOCR = { ...fallback };
+      } else if (allOCRInvoices.length > 0 && auditStatus !== 'SKIPPED') {
+        // Don't show invoices already claimed by other rows in this group.
+        // SKIPPED rows (TXXX/T400) must never show another invoice's data as displayOCR.
+        const fallback = allOCRInvoices.find(
+          i => isInvoiceDoc(i) && !claimedOCRInvNos.has(normInvNo(i.invoice_number) || '')
+        ) ?? null;
+        if (fallback) displayOCR = { ...fallback };
       }
 
       let primaryFile = matchingFiles[0] || null;
