@@ -22,7 +22,7 @@ declare global {
 }
 
 import { fileStorageService } from './services/fileStorageService';
-import { fetchAllSellerRows, upsertSeller, deleteSeller, upsertSellers, SellerRow } from './services/supabaseService';
+import { fetchAllSellerRows, upsertSeller, deleteSeller, upsertSellers, SellerRow, recordOCRCorrections, OCRCorrectionRecord } from './services/supabaseService';
 import { logger } from './services/loggerService';
 import { getSession, clearSession, AppUser } from './services/authService';
 import LoginScreen from './components/LoginScreen';
@@ -231,15 +231,46 @@ const App: React.FC = () => {
     });
 
     const handleSave = (id: string, updatedData: InvoiceData) => {
-        updateInvoices(prev => prev.map(inv => {
-            if (inv.id === id) {
-                const newData = [...inv.data];
-                if (newData.length > 0) newData[0] = updatedData;
-                else newData.push(updatedData);
-                return { ...inv, data: newData };
+        updateInvoices(prev => {
+            // OCR correction feedback loop — fire-and-forget, never throws
+            const _original = prev.find(inv => inv.id === id)?.data[0];
+            if (_original) {
+                const TRACKED: Array<keyof InvoiceData> = [
+                    'invoice_number', 'invoice_date', 'seller_name', 'seller_tax_id',
+                    'buyer_tax_id', 'amount_sales', 'amount_tax', 'amount_total',
+                    'tax_code', 'voucher_type',
+                ];
+                const diffs: OCRCorrectionRecord[] = [];
+                for (const f of TRACKED) {
+                    const from = String(_original[f] ?? '');
+                    const to   = String(updatedData[f] ?? '');
+                    if (from !== to && to) {
+                        diffs.push({
+                            file_id: id,
+                            voucher_id: project?.erpData?.find(
+                                e => id === e.voucher_id || id.startsWith(e.voucher_id + '-') || id.startsWith(e.voucher_id + '_')
+                            )?.voucher_id,
+                            tax_code: _original.tax_code,
+                            voucher_type: _original.voucher_type ?? undefined,
+                            field_name: f,
+                            original_value: from || null,
+                            corrected_value: to,
+                        });
+                    }
+                }
+                if (diffs.length > 0) recordOCRCorrections(diffs).catch(() => {});
             }
-            return inv;
-        }));
+
+            return prev.map(inv => {
+                if (inv.id === id) {
+                    const newData = [...inv.data];
+                    if (newData.length > 0) newData[0] = updatedData;
+                    else newData.push(updatedData);
+                    return { ...inv, data: newData };
+                }
+                return inv;
+            });
+        });
         setSelectedKey(null);
     };
 

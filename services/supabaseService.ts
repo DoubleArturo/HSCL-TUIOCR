@@ -92,3 +92,25 @@ export async function deleteSeller(id: string): Promise<void> {
   const { error } = await client.from('seller_db').delete().eq('id', id);
   if (error) console.warn('[SellerDB] deleteSeller failed:', error.message);
 }
+
+export interface OCRCorrectionRecord {
+  file_id: string;
+  voucher_id?: string;
+  tax_code?: string | null;
+  voucher_type?: string | null;
+  field_name: string;
+  original_value: string | null;
+  corrected_value: string;
+  user_email?: string;
+}
+
+/**
+ * Batch-insert OCR correction diffs for analytics.
+ * Silently no-ops if Supabase is unavailable or corrections is empty.
+ */
+export async function recordOCRCorrections(corrections: OCRCorrectionRecord[]): Promise<void> {
+  const client = getClient();
+  if (!client || corrections.length === 0) return;
+  const { error } = await client.from('ocr_corrections').insert(corrections);
+  if (error) console.warn('[OCR Corrections] Failed to record:', error.message);
+}
