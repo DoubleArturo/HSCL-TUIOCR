@@ -534,7 +534,7 @@ function normalizeFieldConfidence(item: InvoiceData): void {
   fc.currency    = typeof fc.currency    === 'number' ? fc.currency    : 0.7;
 }
 
-function deduplicateResults(results: InvoiceData[]): InvoiceData[] {
+export function deduplicateResults(results: InvoiceData[]): InvoiceData[] {
   // --- Deduplicate ghost results & filter mixed NOT_INVOICE types ---
   // Check if the file contains at least one valid invoice (not a packing list or empty document)
   const isGenericDocument = (type: string) => {
@@ -769,6 +769,25 @@ export const analyzeInvoice = async (
 
         if (hasMismatch) {
           console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1 with gemini-2.5-pro...`);
+
+          // Pro ROI guard: if Flash result is already reliable (high confidence + valid arithmetic),
+          // the ERP amount is likely the one that's wrong — skip Pro escalation.
+          // Saves ~$0.03/escalation when OCR is correct but ERP data has a typo.
+          const flashIsReliable = validInvoices.every(
+            inv =>
+              inv.verification.ai_confidence >= 85 &&
+              Math.abs((inv.amount_sales + inv.amount_tax) - inv.amount_total) <= 1 &&
+              !!inv.invoice_number,
+          );
+          if (flashIsReliable) {
+            console.log(`[Pro Guard] Flash result is reliable (confidence≥85, arithmetic valid, invoice_number present) — ERP amount likely wrong, skipping Pro`);
+            results.forEach(r => {
+              if (!r.verification.flagged_fields.includes('erp_amount_suspicious')) {
+                r.verification.flagged_fields.push('erp_amount_suspicious');
+              }
+            });
+            return results;
+          }
 
           // ESCALATION: Use the much smarter (but slower) Pro model for the single validation retry
           const nextModel = 'gemini-2.5-pro';

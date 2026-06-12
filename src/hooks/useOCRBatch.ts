@@ -232,6 +232,94 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
       logger.info('QUEUE', `Processing item: ${item.id}`);
 
       try {
+        // ── PDF Per-Page Routing ──────────────────────────────────────────────
+        // Multi-page PDFs: render each page to an image so future per-page
+        // clarity assessment can apply. Falls back to whole-PDF on any error.
+        const isPDF = item.file.type === 'application/pdf' ||
+          item.file.name.toLowerCase().endsWith('.pdf');
+
+        if (isPDF) {
+          try {
+            const { renderPDFToPageFiles } = await import('../services/pdfPageRenderer');
+            const pageFiles = await renderPDFToPageFiles(item.file);
+
+            if (pageFiles.length > 1) {
+              logger.info('PDF', `${item.id}: rendering ${pageFiles.length} pages for per-page OCR`);
+              const pdfStartTime = Date.now();
+
+              // Build a simplified ERP hint for the PDF path
+              let pdfExpectedERP = undefined;
+              if (project && project.erpData) {
+                const matchingErp = project.erpData.find(erp =>
+                  item.id === erp.voucher_id ||
+                  item.id.startsWith(erp.voucher_id + '-') ||
+                  item.id.startsWith(erp.voucher_id + '_'),
+                );
+                if (matchingErp) {
+                  pdfExpectedERP = {
+                    amount_total: matchingErp.amount_total,
+                    amount_sales: matchingErp.amount_sales,
+                    amount_tax: matchingErp.amount_tax,
+                    invoice_numbers: matchingErp.invoice_numbers,
+                  };
+                }
+              }
+
+              const allPageResults: InvoiceData[] = [];
+              for (const pageFile of pageFiles) {
+                if (cancelProcessingRef.current) break;
+                try {
+                  const pageBase64 = await fileToBase64(pageFile);
+                  const pageResults = await analyzeInvoice(
+                    pageBase64, 'image/png', selectedModel, 0, knownSellersFromExcel, pdfExpectedERP,
+                  );
+                  if (pageResults) allPageResults.push(...pageResults);
+                } catch (pageErr) {
+                  logger.warn('PDF', `Page OCR failed for ${pageFile.name}`, pageErr);
+                }
+              }
+
+              if (allPageResults.length > 0) {
+                // Cross-page dedup: keep first occurrence of each invoice_number
+                const seenNos = new Set<string>();
+                const results = allPageResults.filter(inv => {
+                  if (!inv.invoice_number) return true;
+                  const norm = inv.invoice_number.replace(/[\s-]/g, '').toUpperCase();
+                  if (seenNos.has(norm)) return false;
+                  seenNos.add(norm);
+                  return true;
+                });
+
+                const pdfLog = `[PDF] Per-page OCR: ${pageFiles.length} pages → ${results.length} invoices`;
+                results.forEach(r => { r.trace_logs = [pdfLog, ...(r.trace_logs || [])]; });
+                results.forEach(r => {
+                  const normNo = (r.invoice_number || '').replace(/[\s-]/g, '').toUpperCase();
+                  if (normNo) {
+                    if (seenInvoiceNumbers.has(normNo)) {
+                      r.trace_logs = r.trace_logs || [];
+                      r.trace_logs.push(`[System Warning] Duplicate Invoice Number Detected: ${r.invoice_number}`);
+                    } else {
+                      seenInvoiceNumbers.add(normNo);
+                    }
+                  }
+                });
+
+                const duration = Date.now() - pdfStartTime;
+                logger.info('API', `Success (pdf-per-page): ${item.id}`, {
+                  duration, invoiceCount: results.length, pageCount: pageFiles.length,
+                });
+                changesMap.set(item.id, { status: 'SUCCESS', data: results });
+                return;
+              }
+              // allPageResults empty: fall through to whole-PDF path
+            }
+            // Single-page PDF or zero pages returned: fall through
+          } catch (pdfErr) {
+            logger.warn('PDF', `Per-page routing failed for ${item.id}, falling back to whole-PDF`, pdfErr);
+          }
+        }
+        // ── End PDF Per-Page Routing ─────────────────────────────────────────
+
         // ── Step 1：圖像清晰度評估（僅限 bitmap，PDF 跳過）──────────────────
         // PDF 由 Gemini 自行渲染，canvas-based 清晰度評估無法處理 PDF。
         let clarityScore: ClarityScore | null = null;
