@@ -190,29 +190,34 @@ function buildSystemPrompt(expectedERP?: ExpectedERP, validationRetryCount = 0):
   return systemPrompt;
 }
 
+let _supabaseSellersCache: { data: Record<string, string>; ts: number } | null = null;
+const SELLER_CACHE_TTL_MS = 30 * 60 * 1000;
+
 async function mergeSellerDB(knownSellers: Record<string, string>): Promise<Record<string, string>> {
-  // Load Static Seller DB once
+  const now = Date.now();
+
+  if (!_supabaseSellersCache || now - _supabaseSellersCache.ts >= SELLER_CACHE_TTL_MS) {
+    let SUPABASE_SELLERS: Record<string, string> = {};
+    try {
+      const { fetchAllSellers } = await import('./supabaseService');
+      SUPABASE_SELLERS = await fetchAllSellers();
+    } catch (e) {
+      console.warn('Failed to load Supabase seller DB', e);
+    }
+    _supabaseSellersCache = { data: SUPABASE_SELLERS, ts: now };
+    console.log('[SellerDB] Supabase cache refreshed');
+  }
+
   let STATIC_SELLERS: Record<string, string> = {};
   try {
     const db = await import('../src/data/seller_db.json');
-    STATIC_SELLERS = db.default || db;
+    STATIC_SELLERS = (db as any).default || db;
   } catch (e) {
     console.warn('Failed to load seller_db.json', e);
   }
 
-  // TODO: N+1 issue — fetchAllSellers is called once per analyzeInvoice invocation.
-  // Consider caching at the App level and passing in as a parameter.
-  // Load Supabase dynamic seller DB (highest priority)
-  let SUPABASE_SELLERS: Record<string, string> = {};
-  try {
-    const { fetchAllSellers } = await import('./supabaseService');
-    SUPABASE_SELLERS = await fetchAllSellers();
-  } catch (e) {
-    console.warn('Failed to load Supabase seller DB', e);
-  }
-
-  // Merge: Static < ERP Excel < Supabase (Supabase wins)
-  return { ...STATIC_SELLERS, ...knownSellers, ...SUPABASE_SELLERS };
+  // Merge priority: Static < ERP Excel < Supabase (Supabase wins)
+  return { ...STATIC_SELLERS, ...knownSellers, ..._supabaseSellersCache!.data };
 }
 
 async function postProcessItems(
@@ -390,6 +395,16 @@ async function postProcessItems(
       if (original !== item.invoice_number) logs.push(`Rule 1: Cleaned invoice_number (${original} → ${item.invoice_number})`);
     }
 
+    // Issue 12: invoice_number must not contain the buyer's own tax ID (16547744).
+    // Real cases: G61-Q40142, G61-Q40092 — Gemini copies 買受人統一編號 into invoice_number.
+    const BUYER_KNOWN_TAX_ID = '16547744';
+    if (item.invoice_number && item.invoice_number.includes(BUYER_KNOWN_TAX_ID)) {
+      if (!item.verification.flagged_fields.includes('invoice_number_is_buyer_tax_id')) {
+        item.verification.flagged_fields.push('invoice_number_is_buyer_tax_id');
+      }
+      logs.push(`[Issue12] invoice_number '${item.invoice_number}' contains buyer_tax_id '${BUYER_KNOWN_TAX_ID}' — likely misread`);
+    }
+
     // --- c) 自動金額修正 ---
     const amountFix = autoCorrectAmounts(item);
     if (amountFix.corrected) {
@@ -405,6 +420,21 @@ async function postProcessItems(
         }
       });
       logs.push(`[驗證] ${validationFailures.length} validation error(s) found: ${validationFailures.map(f => f.field).join(', ')}`);
+    }
+
+    // Issue 13: invoice_date year sanity check — invoices should be from 2020–2030 era.
+    // Catches ROC year misreads: 民國115 → mistakenly 105 → 2016.
+    if (item.invoice_date) {
+      const yearMatch = item.invoice_date.match(/^(\d{4})-/);
+      if (yearMatch) {
+        const year = parseInt(yearMatch[1], 10);
+        if (year < 2020 || year > 2030) {
+          if (!item.verification.flagged_fields.includes('invoice_date')) {
+            item.verification.flagged_fields.push('invoice_date');
+          }
+          logs.push(`[Issue13] invoice_date year ${year} out of 2020–2030 range — likely ROC misread: ${item.invoice_date}`);
+        }
+      }
     }
 
     // --- e) 未知類型記錄 ---
@@ -448,7 +478,7 @@ function validateConfidenceScore(
     amount_sales:  /^\d+$/,
     amount_tax:    /^\d+$/,
     amount_total:  /^\d+$/,
-    invoice_date:  /^\d{4}\/\d{2}\/\d{2}$/,
+    invoice_date:  /^\d{4}-\d{2}-\d{2}$/,
     tax_code:      /^T\d{3}$|^TXXX$/,
   };
 

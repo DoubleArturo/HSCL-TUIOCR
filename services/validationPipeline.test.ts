@@ -54,7 +54,28 @@ describe('validateInvoice()', () => {
     });
   });
 
-  // b) amount arithmetic
+  // b) GUI_LENGTH — 9 碼 / 11 碼
+  describe('invoice_number GUI_LENGTH rule (9 or 11 chars)', () => {
+    it('9 碼發票號（缺 1 位）→ 同時觸發 GUI_FORMAT 和 GUI_LENGTH', () => {
+      const failures = validateInvoice(makeInvoice({ invoice_number: 'AB1234567' }));
+      expect(failures.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+      expect(failures.some(f => f.rule === 'GUI_LENGTH')).toBe(true);
+    });
+
+    it('11 碼發票號（多 1 位）→ 同時觸發 GUI_FORMAT 和 GUI_LENGTH', () => {
+      const failures = validateInvoice(makeInvoice({ invoice_number: 'AB123456789' }));
+      expect(failures.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+      expect(failures.some(f => f.rule === 'GUI_LENGTH')).toBe(true);
+    });
+
+    it('8 碼發票號（缺 2 位）→ 觸發 GUI_FORMAT 但不觸發 GUI_LENGTH（僅 9/11 觸發）', () => {
+      const fail8 = validateInvoice(makeInvoice({ invoice_number: 'AB123456' }));
+      expect(fail8.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+      expect(fail8.some(f => f.rule === 'GUI_LENGTH')).toBe(false);
+    });
+  });
+
+  // c) amount arithmetic
   describe('amount arithmetic', () => {
     it('正確: 1000 + 100 = 1100 — 無失敗', () => {
       const failures = validateInvoice(
@@ -230,6 +251,13 @@ describe('autoCorrectAmounts()', () => {
       expect(item.amount_tax).toBe(100);
       expect(result.log.toLowerCase()).toContain('swapped');
     });
+
+    it('total=0 時不觸發 swap（條件需 total > 0）', () => {
+      const item = makeInvoice({ amount_sales: 0, amount_tax: 100, amount_total: 0 });
+      const result = autoCorrectAmounts(item);
+      expect(result.corrected).toBe(false);
+      expect(item.amount_total).toBe(0);
+    });
   });
 
   // b) 加總修正（誤差閾值）
@@ -253,12 +281,27 @@ describe('autoCorrectAmounts()', () => {
       expect(item.amount_total).toBe(1100);
       expect(result.log.toLowerCase()).toContain('auto-corrected');
     });
+
+    it('誤差恰好 =51（超過閾值 1）— corrected=false（不修正）', () => {
+      const item = makeInvoice({ amount_sales: 1000, amount_tax: 100, amount_total: 1049 });
+      const result = autoCorrectAmounts(item);
+      expect(result.corrected).toBe(false);
+      expect(item.amount_total).toBe(1049);
+      expect(result.log).toContain('exceeds');
+    });
   });
 
   // c) 不需修正
   describe('不需修正', () => {
     it('amount_total 已正確 — corrected=false, log=空字串', () => {
       const item = makeInvoice({ amount_sales: 1000, amount_tax: 100, amount_total: 1100 });
+      const result = autoCorrectAmounts(item);
+      expect(result.corrected).toBe(false);
+      expect(result.log).toBe('');
+    });
+
+    it('誤差恰好 =1（容差範圍，視為無誤差）— corrected=false', () => {
+      const item = makeInvoice({ amount_sales: 1000, amount_tax: 100, amount_total: 1099 });
       const result = autoCorrectAmounts(item);
       expect(result.corrected).toBe(false);
       expect(result.log).toBe('');

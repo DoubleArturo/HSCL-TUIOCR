@@ -6,7 +6,7 @@ type: project
 
 # 已知問題與邊界情況
 
-> 最後更新：2026-05-30, commit (P2a 整合完成)
+> 最後更新：2026-06-12（新增 Issue 11–13，來源：錯誤發票批次分析）
 
 ## Issue 1：XW17220651 淡墨發票無法辨識
 
@@ -436,6 +436,120 @@ console 應該看到：`WARN: Enhancement failed for file.pdf, falling back to F
 - **症狀**：Canvas 無法載入 > 100MB 的圖，或某些色彩空間不支援
 - **防護**：try/catch，記 warning log，graceful fallback
 - **相關檔**：`useOCRBatch.ts` L320–335
+
+---
+
+---
+
+## Issue 11：TXXX ERP 行 fallback 污染（重複 mapping）✅ 已修復
+
+**修復時間**：2026-06-12，commit（待 commit）
+
+**症狀**
+- ERP 有 TXXX 稅別的行（雜項收據），或 ERP 無統編的行
+- auditStatus 顯示 AMOUNT_MISMATCH，金額嚴重不符（如 ERP:1700 vs OCR:325714）
+- OCR 欄位顯示的是同一個 PDF 裡其他已配對發票的統編和金額
+
+**案例**
+- G12-Q50026 第二笔：ERP 1150406129(TXXX/53元) → 錯 claim T301 YL06030291(516元)
+- G12-Q50006 第三笔：ERP TXXX(1700元) → 錯 claim T301 ZF66682141(325714元)
+- G12-Q50019 第四笔、G12-Q50024 第三笔 等共 8 件
+
+**根因**
+`auditLogic.ts` fallback 邏輯（L170–181）：當 ERP 行找不到 invoice_number 匹配時，fallback 會從剩餘 OCR pool 找金額接近的發票。但 TXXX ERP 行原本就不應該配對任何 OCR 發票，因此 fallback 拿到了已被使用的發票，造成重複 mapping。
+
+**解法（待實作）**
+```typescript
+// auditLogic.ts fallback 邏輯前加 guard
+if (shouldSkipFromAudit(erpRow)) {
+  // TXXX / 跳過類型不做 fallback，直接 auditStatus = SKIPPED
+  return { ...erpRow, auditStatus: 'SKIPPED' };
+}
+// ... 原有 fallback 邏輯
+```
+
+**相關檔**
+- `src/lib/auditLogic.ts` L170–181（fallback）
+- `src/lib/auditLogic.ts` L24–36（shouldSkipFromAudit）
+
+**改動風險**
+⚠️ 改動前需確認：目前 shouldSkipFromAudit 是否已涵蓋所有 TXXX case？需加測試：「TXXX ERP 行不產生 AMOUNT_MISMATCH，只產生 SKIPPED」
+
+---
+
+## Issue 12：尾號/invoice_number 誤讀為買方統編 ✅ 已修復
+
+**症狀**
+- auditStatus = AMOUNT_MISMATCH 或 TAX_ID_MISMATCH
+- OCR 的 invoice_number 最後 8 位 = 16547744（買方自身統編）
+- 實際發票號碼完全不同（如 86955291、89698402）
+
+**案例**
+- G61-Q40142：正確尾號 86955291 → OCR 輸出 16547744
+- G61-Q40092：正確尾號 89698402 → OCR 輸出 16547744
+- 兩案均為三聯手寫發票，買方統編欄位在版面上接近發票號區域
+
+**根因**
+Gemini 在三聯手寫發票的版面解析中，將「買受人統一編號」欄的數字 16547744 誤填入 invoice_number 欄位（或尾號部分）。
+
+**解法（建議後處理，不動 prompt 以外的邏輯）**
+```typescript
+// geminiService.ts 後處理段落
+if (item.invoice_number && item.buyer_tax_id) {
+  if (item.invoice_number.includes(item.buyer_tax_id)) {
+    item.verification.flagged_fields.push('invoice_number_contains_buyer_tax_id');
+  }
+}
+// 特例：買方統編 hardcode 檢查
+if (item.invoice_number === '16547744' || item.invoice_number?.endsWith('16547744')) {
+  item.verification.flagged_fields.push('invoice_number_is_buyer_tax_id');
+}
+```
+
+另加 prompt 說明（services/prompts/base.ts）：
+```diff
++ - invoice_number: NEVER copy the buyer_tax_id (買受人統一編號) into this field. The buyer tax ID is in a separate box and is NOT part of the invoice number.
+```
+
+**相關檔**
+- `services/prompts/base.ts`（prompt 補充）
+- `services/geminiService.ts`（後處理 flag）
+
+**改動風險**
+低。後處理只是加 flag，不改比對邏輯。注意：flag 加入後需確認 UI 有顯示 `invoice_number_contains_buyer_tax_id` 警告。
+
+---
+
+## Issue 13：民國年份轉換誤讀（115年 → 2016 而非 2026）✅ 已修復
+
+**症狀**
+- invoice_date 顯示 2016-xx-xx 或 2024-xx-xx
+- 實際 ERP 日期為 2026-xx-xx
+- 誤差 2 年或 10 年
+
+**案例**
+- G61-Q40052：民國115年 → OCR 輸出 2016-03-26（應為 2026-03-26，誤差 10 年）
+  推測：Gemini 讀 '115' 為 '105'，105+1911=2016
+- G61-Q40062：發票印 2026-04-01 → OCR 輸出 2024-04-01（直接誤讀年份數字）
+
+**根因**
+PROMPT_BASE 的轉換公式本身正確（ROC year + 1911），但：
+1. 掃描低解析時 '115' 容易被誤讀為 '105'
+2. 缺少「當前年份應為 2025–2026」的 sanity check
+
+**解法（Prompt 調整建議，不動代碼）**
+```diff
+# services/prompts/base.ts L6
+- invoice_date: Normalize to YYYY-MM-DD. ROC year rule: 3-digit year + 1911 (e.g. "115/3/2" → 2026-03-02, "1150302" → 2026-03-02). 4-digit years starting with 20xx are AD years.
++ invoice_date: Normalize to YYYY-MM-DD. ROC year rule: 3-digit year + 1911 (e.g. "115/3/2" → 2026-03-02, "1150302" → 2026-03-02). 4-digit years starting with 20xx are AD years.
++ YEAR SANITY CHECK: These invoices are from 2025–2026. If your computed year is before 2020 or after 2030, you likely misread the century digit. Common error: 民國115 → 民國105 → 2016 (WRONG, correct is 2026).
+```
+
+**相關檔**
+- `services/prompts/base.ts` L6
+
+**改動風險**
+低。只改 prompt 說明文字，不影響代碼邏輯。改後需用 G61-Q40052 原始 PDF 手動驗證。
 
 ---
 
