@@ -24,7 +24,7 @@ declare global {
 import { fileStorageService } from './services/fileStorageService';
 import { fetchAllSellerRows, upsertSeller, deleteSeller, upsertSellers, SellerRow, recordOCRCorrections, OCRCorrectionRecord } from './services/supabaseService';
 import { logger } from './services/loggerService';
-import { getSession, clearSession, AppUser } from './services/authService';
+import { getSession, clearSession, initSession, AppUser } from './services/authService';
 import LoginScreen from './components/LoginScreen';
 import AdminPage from './components/AdminPage';
 import { useAuditList } from './src/hooks/useAuditList';
@@ -35,7 +35,24 @@ const BUYER_TAX_ID_REQUIRED = "16547744";
 
 const App: React.FC = () => {
     const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
+    const [authLoading, setAuthLoading] = useState(true);
     const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB' | 'ADMIN'>('PROJECT_LIST');
+
+    // Verify session with Supabase on mount (handles page refresh)
+    useEffect(() => {
+        initSession().then(user => {
+            setCurrentUser(user);
+            setAuthLoading(false);
+        });
+    }, []);
+
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <span className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+            </div>
+        );
+    }
 
     if (!currentUser) {
         return <LoginScreen onLogin={user => setCurrentUser(user)} />;
@@ -505,10 +522,8 @@ const App: React.FC = () => {
                             <p className="text-gray-500 mt-2 font-medium">請選擇或建立月份稽核專案</p>
                         </div>
                         <div className="flex items-center gap-3">
-                            <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 px-4 py-2.5 rounded-xl font-mono">
-                                <span className="font-bold text-gray-700">{currentUser.employee_id}</span>
-                                <span className="text-gray-400">·</span>
-                                <span>{currentUser.name}</span>
+                            <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 border border-gray-200 px-4 py-2.5 rounded-xl">
+                                <span className="text-gray-700">{currentUser.email}</span>
                                 {currentUser.is_admin && <span className="text-[10px] bg-indigo-100 text-indigo-700 font-bold px-1.5 py-0.5 rounded">ADMIN</span>}
                             </div>
                             {currentUser.is_admin && (
@@ -522,7 +537,7 @@ const App: React.FC = () => {
                             <button onClick={() => setIsCreating(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-100 flex items-center gap-2 transition-all active:scale-95">
                                 <PlusSquare className="w-5 h-5" /> 建立新專案
                             </button>
-                            <button onClick={() => { clearSession(); setCurrentUser(null); }} className="p-3 text-gray-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" title="登出">
+                            <button onClick={() => clearSession().then(() => setCurrentUser(null))} className="p-3 text-gray-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors" title="登出">
                                 <LogOut className="w-4 h-4" />
                             </button>
                         </div>

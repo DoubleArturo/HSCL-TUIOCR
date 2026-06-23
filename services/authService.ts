@@ -4,120 +4,98 @@ let _client: SupabaseClient | null = null;
 
 function getClient(): SupabaseClient {
   if (_client) return _client;
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  _client = createClient(url, key);
+  _client = createClient(
+    import.meta.env.VITE_SUPABASE_URL,
+    import.meta.env.VITE_SUPABASE_ANON_KEY,
+  );
   return _client;
 }
 
 export interface AppUser {
   id: string;
-  employee_id: string;
-  name: string;
+  email: string;
   is_admin: boolean;
-  created_at: string;
-  last_login_at: string | null;
 }
 
 const SESSION_KEY = 'auth_user';
+let _cached: AppUser | null = null;
 
 export function getSession(): AppUser | null {
+  if (_cached) return _cached;
   try {
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
+    _cached = raw ? JSON.parse(raw) : null;
+    return _cached;
   } catch {
     return null;
   }
 }
 
-function saveSession(user: AppUser) {
+function saveSession(user: AppUser): void {
+  _cached = user;
   localStorage.setItem(SESSION_KEY, JSON.stringify(user));
 }
 
-export function clearSession() {
+export async function clearSession(): Promise<void> {
+  _cached = null;
   localStorage.removeItem(SESSION_KEY);
+  await getClient().auth.signOut();
 }
 
-export async function login(employeeId: string, name: string): Promise<{ user: AppUser | null; error: string | null }> {
-  const client = getClient();
-  const eid = employeeId.trim().toUpperCase();
-  const nm = name.trim();
+// Called on app load to verify the Supabase session is still valid.
+export async function initSession(): Promise<AppUser | null> {
+  const { data: { session } } = await getClient().auth.getSession();
+  if (!session?.user) {
+    _cached = null;
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+  const user: AppUser = {
+    id: session.user.id,
+    email: session.user.email ?? '',
+    is_admin: false,
+  };
+  saveSession(user);
+  return user;
+}
 
-  if (!eid || !nm) return { user: null, error: '請填寫工號與姓名' };
-  if (!/^[A-Z][0-9]{4}$/.test(eid)) return { user: null, error: '工號格式錯誤（例：A1282）' };
+export async function login(
+  email: string,
+  password: string,
+): Promise<{ user: AppUser | null; error: string | null }> {
+  const { data, error } = await getClient().auth.signInWithPassword({ email, password });
+  if (error) return { user: null, error: error.message };
+  if (!data.user) return { user: null, error: '登入失敗，請再試一次' };
+  const user: AppUser = { id: data.user.id, email: data.user.email ?? email, is_admin: false };
+  saveSession(user);
+  return { user, error: null };
+}
 
-  // 查詢是否已存在
-  const { data: existing, error: fetchErr } = await client
-    .from('users')
-    .select('*')
-    .eq('employee_id', eid)
-    .maybeSingle();
+export async function signup(
+  email: string,
+  password: string,
+): Promise<{ user: AppUser | null; error: string | null }> {
+  const { data, error } = await getClient().auth.signUp({ email, password });
+  if (error) return { user: null, error: error.message };
+  if (!data.user) return { user: null, error: '建立帳號失敗，請再試一次' };
 
-  if (fetchErr) return { user: null, error: `登入失敗：${fetchErr.message}` };
-
-  if (existing) {
-    // 已有帳號：驗證姓名是否吻合
-    if (existing.name !== nm) {
-      return { user: null, error: '工號與姓名不符，請確認後再試' };
-    }
-    // 更新 last_login_at
-    await client.from('users').update({ last_login_at: new Date().toISOString() }).eq('id', existing.id);
-    const user: AppUser = { ...existing, last_login_at: new Date().toISOString() };
+  if (data.session) {
+    // Email confirmation disabled — auto-logged in
+    const user: AppUser = { id: data.user.id, email: data.user.email ?? email, is_admin: false };
     saveSession(user);
     return { user, error: null };
   }
 
-  // 新使用者：自動建帳號
-  const { data: created, error: insertErr } = await client
-    .from('users')
-    .insert({ employee_id: eid, name: nm, is_admin: false, last_login_at: new Date().toISOString() })
-    .select()
-    .single();
-
-  if (insertErr) return { user: null, error: `建立帳號失敗：${insertErr.message}` };
-
-  saveSession(created);
-  return { user: created, error: null };
+  // Email confirmation required
+  return { user: null, error: '確認信已寄出，請點擊信件中的連結後再登入' };
 }
+
+// ─── Admin stubs (not supported without service-role key) ────────────────────
 
 export async function fetchAllUsers(): Promise<AppUser[]> {
-  const session = getSession();
-  if (!session?.is_admin) return [];
-
-  const client = getClient();
-  const { data, error } = await client
-    .from('users')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) return [];
-  return data || [];
+  return [];
 }
 
-export async function deleteUser(targetId: string): Promise<{ error: string | null }> {
-  const session = getSession();
-  if (!session?.is_admin) return { error: '權限不足' };
-  if (session.id === targetId) return { error: '無法刪除自己的帳號' };
-
-  const client = getClient();
-
-  // 先取得該 user 的所有 projects
-  const { data: projects } = await client
-    .from('audit_projects')
-    .select('id')
-    .eq('user_id', targetId);
-
-  const projectIds = (projects || []).map(p => p.id);
-
-  if (projectIds.length > 0) {
-    // 刪 invoice_entries 和 erp_records
-    await client.from('invoice_entries').delete().in('project_id', projectIds);
-    await client.from('erp_records').delete().in('project_id', projectIds);
-    // 刪 projects
-    await client.from('audit_projects').delete().eq('user_id', targetId);
-  }
-
-  // 刪 user
-  const { error } = await client.from('users').delete().eq('id', targetId);
-  if (error) return { error: error.message };
-  return { error: null };
+export async function deleteUser(_targetId: string): Promise<{ error: string | null }> {
+  return { error: '使用者管理功能尚未開放' };
 }
