@@ -41,6 +41,7 @@ const App: React.FC = () => {
         toggleErpFlag,
         updateProjectMeta,
         setProject,
+        saveSnapshot,
     } = useProject(user?.id);
 
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -58,14 +59,31 @@ const App: React.FC = () => {
     const erpInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
-        fileStorageService.pruneOldFiles(30 * 24 * 60 * 60 * 1000).then(count => {
-            if (count > 0) console.log(`Cleaned up ${count} old temporary files`);
-        });
+        // Throttle file pruning to once per week — running every load risks deleting
+        // files that haven't been re-uploaded to cloud storage yet.
+        const PRUNE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
+        const lastPrune = parseInt(localStorage.getItem('_lastFilesPruneTime') || '0');
+        if (Date.now() - lastPrune > PRUNE_INTERVAL_MS) {
+            fileStorageService.pruneOldFiles(30 * 24 * 60 * 60 * 1000).then(count => {
+                if (count > 0) console.log(`Cleaned up ${count} old temporary files`);
+                localStorage.setItem('_lastFilesPruneTime', Date.now().toString());
+            });
+        }
         const checkKey = async () => {
             if (window.aistudio) setHasCustomKey(await window.aistudio.hasSelectedApiKey());
         };
         checkKey();
     }, []);
+
+    // Flush latest project state to localStorage before page unload (closes the
+    // 10-second auto-save gap; cloud sync is async so only localStorage gets flushed).
+    useEffect(() => {
+        const handleBeforeUnload = () => {
+            if (project) saveSnapshot(project);
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, [project, saveSnapshot]);
 
     // --- Project Management ---
 

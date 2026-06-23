@@ -38,19 +38,35 @@ export function useProject(userId?: string) {
   useEffect(() => {
     if (userId) {
       fetchCloudProjects(userId).then(cloudList => {
-        if (cloudList.length > 0) {
-          // Cloud has data — it's the source of truth
-          setProjectList(cloudList);
-          localStorage.setItem('project_list', JSON.stringify(cloudList));
-        } else {
-          // Cloud is empty (first login or no cloud projects yet).
-          // Fall back to any existing localStorage data so the user still
-          // sees their locally-cached projects.
-          const stored = localStorage.getItem('project_list');
-          if (stored) {
-            try { setProjectList(JSON.parse(stored)); } catch { /* ignore */ }
-          }
+        const storedRaw = localStorage.getItem('project_list');
+        const localList: ProjectMeta[] = storedRaw
+          ? (() => { try { return JSON.parse(storedRaw); } catch { return []; } })()
+          : [];
+
+        if (cloudList.length === 0) {
+          // Cloud empty — keep local data intact (first login, no cloud yet, or cloud error)
+          if (localList.length > 0) setProjectList(localList);
+          return;
         }
+
+        // Merge: per-project, keep whichever version has the later updatedAt.
+        // This guards against stale cloud data overwriting newer local edits
+        // (e.g. when cloud sync silently failed in the previous session).
+        const localMap = new Map(localList.map((p: ProjectMeta) => [p.id, p]));
+        const mergedList: ProjectMeta[] = cloudList.map(cp => {
+          const lp = localMap.get(cp.id);
+          if (!lp) return cp;
+          const cloudTime = new Date(cp.updatedAt || 0).getTime();
+          const localTime = new Date(lp.updatedAt || 0).getTime();
+          return localTime > cloudTime ? lp : cp;
+        });
+        // Preserve local-only projects not yet synced to cloud
+        localList.forEach((lp: ProjectMeta) => {
+          if (!cloudList.find(cp => cp.id === lp.id)) mergedList.push(lp);
+        });
+
+        setProjectList(mergedList);
+        localStorage.setItem('project_list', JSON.stringify(mergedList));
       }).catch(() => {
         // Network error: fall back to localStorage cache
         const stored = localStorage.getItem('project_list');
@@ -118,25 +134,44 @@ export function useProject(userId?: string) {
       try {
         const cloudProject = await fetchCloudProject(userId, id);
         if (cloudProject) {
-          setProject(cloudProject);
-
-          // Rehydrate files: IndexedDB cache → Supabase Storage fallback
-          const updated = await Promise.all(cloudProject.invoices.map(async (inv) => {
+          // Guard against stale cloud data: if local cache has a newer updatedAt
+          // (e.g. cloud sync failed silently last session), skip cloud and use local.
+          let skipCloud = false;
+          const storedRaw = localStorage.getItem(`project_${id}`);
+          if (storedRaw) {
             try {
-              const file = await fileStorageService.getFileWithCloudFallback(inv.id, inv.storagePath);
-              if (file) return { ...inv, file, previewUrl: URL.createObjectURL(file) };
-            } catch (err: any) {
-              logger.error('FILE', `Load failed for ${inv.id}`, err);
-              onError?.(inv.id, err);
-            }
-            return inv;
-          }));
-          setProject(prev => prev ? { ...prev, invoices: updated } : null);
+              const stored = JSON.parse(storedRaw);
+              const cloudTime = new Date(cloudProject.updatedAt || 0).getTime();
+              const localTime = new Date(stored.updatedAt || 0).getTime();
+              if (localTime > cloudTime) {
+                skipCloud = true;
+                console.warn('[Cloud] Local cache is newer than cloud — using local to avoid overwriting unsaved edits.');
+              }
+            } catch { /* ignore JSON parse error */ }
+          }
 
-          // Sync to localStorage cache
-          const serializable = serializeProject({ ...cloudProject, invoices: updated });
-          localStorage.setItem(`project_${id}`, JSON.stringify(serializable));
-          return true;
+          if (!skipCloud) {
+            setProject(cloudProject);
+
+            // Rehydrate files: IndexedDB cache → Supabase Storage fallback
+            const updated = await Promise.all(cloudProject.invoices.map(async (inv) => {
+              try {
+                const file = await fileStorageService.getFileWithCloudFallback(inv.id, inv.storagePath);
+                if (file) return { ...inv, file, previewUrl: URL.createObjectURL(file) };
+              } catch (err: any) {
+                logger.error('FILE', `Load failed for ${inv.id}`, err);
+                onError?.(inv.id, err);
+              }
+              return inv;
+            }));
+            setProject(prev => prev ? { ...prev, invoices: updated } : null);
+
+            // Sync to localStorage cache
+            const serializable = serializeProject({ ...cloudProject, invoices: updated });
+            localStorage.setItem(`project_${id}`, JSON.stringify(serializable));
+            return true;
+          }
+          // skipCloud=true: fall through to localStorage path below
         }
       } catch (e) {
         console.warn('[Cloud] loadProject failed, falling back to localStorage:', e);
