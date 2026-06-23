@@ -34,6 +34,7 @@ import { parseERPRows } from './src/lib/erpParser';
 const BUYER_TAX_ID_REQUIRED = "16547744";
 
 const App: React.FC = () => {
+    // === Auth state ===
     const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
     const [authLoading, setAuthLoading] = useState(true);
     const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB' | 'ADMIN'>('PROJECT_LIST');
@@ -46,17 +47,7 @@ const App: React.FC = () => {
         });
     }, []);
 
-    if (authLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-slate-50">
-                <span className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-            </div>
-        );
-    }
-
-    if (!currentUser) {
-        return <LoginScreen onLogin={user => setCurrentUser(user)} />;
-    }
+    // === All remaining hooks — must run before any early return ===
     const {
         projectList,
         project,
@@ -89,6 +80,8 @@ const App: React.FC = () => {
         onBatchComplete: forceSave,
     });
 
+    const { auditList, metrics } = useAuditList(project, batchStats.totalDuration);
+
     const [isCreating, setIsCreating] = useState(false);
     const [createYear, setCreateYear] = useState(new Date().getFullYear());
     const [createMonth, setCreateMonth] = useState(new Date().getMonth() + 1);
@@ -119,6 +112,19 @@ const App: React.FC = () => {
         };
         checkKey();
     }, []);
+
+    // === Early returns — after ALL hooks ===
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <span className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+            </div>
+        );
+    }
+
+    if (!currentUser) {
+        return <LoginScreen onLogin={user => setCurrentUser(user)} />;
+    }
 
     // --- Project Management Functions ---
 
@@ -357,8 +363,6 @@ const App: React.FC = () => {
             ));
         }
     };
-
-    const { auditList, metrics } = useAuditList(project, batchStats.totalDuration);
 
     const exportAuditReport = () => {
         if (auditList.length === 0) return;
