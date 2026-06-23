@@ -13,6 +13,48 @@ function getClient(): SupabaseClient {
   return _client;
 }
 
+// ─── Error Tracking ──────────────────────────────────────────────────────────
+
+interface SyncError {
+  code?: string;
+  message: string;
+  details?: string;
+  hint?: string;
+}
+
+function logSyncError(
+  operation: string,
+  projectId: string | null,
+  err: SyncError,
+  step?: string,
+  context?: Record<string, unknown>,
+): void {
+  const user = getSession();
+  const payload = {
+    user_id: user?.id ?? null,
+    project_id: projectId,
+    operation,
+    step: step ?? null,
+    error_code: err.code ?? null,
+    error_msg: err.message,
+    context: {
+      ...context,
+      ...(err.details ? { details: err.details } : {}),
+      ...(err.hint   ? { hint:    err.hint    } : {}),
+    },
+  };
+
+  // Rich console output for DevTools
+  console.error(`[SyncError] ${operation}${step ? `.${step}` : ''}`, payload);
+
+  // Fire-and-forget write to sync_errors table
+  getClient()
+    .from('sync_errors')
+    .insert(payload)
+    .then(({ error }) => {
+      if (error) console.warn('[SyncError] failed to write log:', error.message);
+    });
+}
 
 // ─── Projects ────────────────────────────────────────────────────────────────
 
@@ -27,7 +69,7 @@ export async function fetchProjectList(): Promise<ProjectMeta[]> {
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
 
-  if (error) { console.warn('[Cloud] fetchProjectList:', error.message); return []; }
+  if (error) { logSyncError('fetchProjectList', null, error); return []; }
 
   // invoiceCount / erpCount 從 counts
   const ids = (data || []).map(p => p.id);
@@ -68,7 +110,7 @@ export async function upsertProject(proj: Project): Promise<void> {
     updated_at: new Date().toISOString(),
   }, { onConflict: 'id' });
 
-  if (error) console.warn('[Cloud] upsertProject:', error.message);
+  if (error) logSyncError('upsertProject', proj.id, error);
 }
 
 export async function deleteProject(id: string): Promise<void> {
@@ -76,7 +118,7 @@ export async function deleteProject(id: string): Promise<void> {
   const user = getSession();
   if (!user) return;
   const { error } = await client.from('audit_projects').delete().eq('id', id).eq('user_id', user.id);
-  if (error) console.warn('[Cloud] deleteProject:', error.message);
+  if (error) logSyncError('deleteProject', id, error);
 }
 
 // ─── Invoice Entries ──────────────────────────────────────────────────────────
@@ -92,7 +134,7 @@ export async function upsertInvoiceEntries(projectId: string, entries: InvoiceEn
     .eq('id', projectId)
     .eq('user_id', user.id)
     .maybeSingle();
-  if (!proj) { console.warn('[Cloud] upsertInvoiceEntries: unauthorized projectId'); return; }
+  if (!proj) { logSyncError('upsertInvoiceEntries', projectId, { message: 'unauthorized: project not found for user' }, 'auth_check', { userId: user.id }); return; }
 
   const rows = entries.map(inv => ({
     id: inv.id,
@@ -111,7 +153,7 @@ export async function upsertInvoiceEntries(projectId: string, entries: InvoiceEn
     const { error } = await client
       .from('invoice_entries')
       .upsert(chunk, { onConflict: 'id,project_id' });
-    if (error) console.warn('[Cloud] upsertInvoiceEntries:', error.message);
+    if (error) logSyncError('upsertInvoiceEntries', projectId, error, `chunk_${i / 200}`, { chunkSize: chunk.length, totalEntries: entries.length });
   }
 }
 
@@ -133,7 +175,7 @@ export async function fetchInvoiceEntries(projectId: string): Promise<InvoiceEnt
     .select('id, status, data, error, file_name, file_type')
     .eq('project_id', projectId);
 
-  if (error) { console.warn('[Cloud] fetchInvoiceEntries:', error.message); return []; }
+  if (error) { logSyncError('fetchInvoiceEntries', projectId, error); return []; }
 
   return (data || []).map(row => ({
     id: row.id,
@@ -157,14 +199,14 @@ export async function deleteInvoiceEntry(projectId: string, entryId: string): Pr
     .eq('id', projectId)
     .eq('user_id', user.id)
     .maybeSingle();
-  if (!proj) { console.warn('[Cloud] deleteInvoiceEntry: unauthorized'); return; }
+  if (!proj) { logSyncError('deleteInvoiceEntry', projectId, { message: 'unauthorized: project not found for user' }, 'auth_check', { userId: user.id }); return; }
 
   const { error } = await client
     .from('invoice_entries')
     .delete()
     .eq('project_id', projectId)
     .eq('id', entryId);
-  if (error) console.warn('[Cloud] deleteInvoiceEntry:', error.message);
+  if (error) logSyncError('deleteInvoiceEntry', projectId, error, undefined, { entryId });
 }
 
 // ─── ERP Records ─────────────────────────────────────────────────────────────
@@ -180,17 +222,20 @@ export async function upsertErpRecords(projectId: string, records: ERPRecord[]):
     .eq('id', projectId)
     .eq('user_id', user.id)
     .maybeSingle();
-  if (!proj) { console.warn('[Cloud] upsertErpRecords: unauthorized projectId'); return; }
+  if (!proj) {
+    logSyncError('upsertErpRecords', projectId, { message: 'unauthorized: project not found for user' }, 'auth_check', { userId: user.id, recordCount: records.length });
+    return;
+  }
 
   // Delete existing records first — avoids ON CONFLICT issues entirely.
-  // Batch upsert ON CONFLICT fails when the same voucher_id appears in multiple
-  // ERP rows (one voucher → many invoices), even after client-side grouping,
-  // due to how PostgREST handles the VALUES clause.
   const { error: delErr } = await client
     .from('erp_records')
     .delete()
     .eq('project_id', projectId);
-  if (delErr) { console.warn('[Cloud] upsertErpRecords delete:', delErr.message); return; }
+  if (delErr) {
+    logSyncError('upsertErpRecords', projectId, delErr, 'delete', { recordCount: records.length });
+    return;
+  }
 
   if (records.length === 0) return;
 
@@ -206,12 +251,26 @@ export async function upsertErpRecords(projectId: string, records: ERPRecord[]):
     data: group,
   }));
 
+  const totalRows = rows.length;
+  const totalChunks = Math.ceil(totalRows / 200);
   for (let i = 0; i < rows.length; i += 200) {
+    const chunkIndex = i / 200;
     const chunk = rows.slice(i, i + 200);
     const { error } = await client
       .from('erp_records')
       .insert(chunk);
-    if (error) console.warn('[Cloud] upsertErpRecords insert:', error.message);
+    if (error) {
+      // Sample first 3 voucher_ids in failing chunk for diagnosis
+      const voucherSample = chunk.slice(0, 3).map(r => r.voucher_id);
+      logSyncError('upsertErpRecords', projectId, error, `insert_chunk_${chunkIndex}`, {
+        rawRecordCount: records.length,
+        uniqueVoucherCount: totalRows,
+        totalChunks,
+        chunkIndex,
+        chunkSize: chunk.length,
+        voucherIdSample: voucherSample,
+      });
+    }
   }
 }
 
@@ -233,7 +292,7 @@ export async function fetchErpRecords(projectId: string): Promise<ERPRecord[]> {
     .select('data')
     .eq('project_id', projectId);
 
-  if (error) { console.warn('[Cloud] fetchErpRecords:', error.message); return []; }
+  if (error) { logSyncError('fetchErpRecords', projectId, error); return []; }
   return (data || []).flatMap(row => Array.isArray(row.data) ? row.data : [row.data]) as ERPRecord[];
 }
 
