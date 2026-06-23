@@ -1,5 +1,11 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
+
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) _supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+  return _supabase;
+}
 import { InvoiceData, ExpectedERP } from "../types";
 import { assignTaxCode, syncVoucherType, isForeignInvoice } from '../src/lib/taxCodeLogic';
 import { PROMPT_BASE } from './prompts/base';
@@ -649,9 +655,7 @@ export const analyzeInvoice = async (
       }
     } else {
       // Production: call via Supabase Edge Function proxy
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const supabase = createClient(supabaseUrl, supabaseAnonKey);
+      const supabase = getSupabaseClient();
 
       const { data, error } = await supabase.functions.invoke('gemini-ocr-proxy', {
         body: {

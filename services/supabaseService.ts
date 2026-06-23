@@ -80,9 +80,12 @@ export async function upsertSellers(
       source,
     }));
   if (rows.length === 0) return;
+  const deduped = Array.from(
+    rows.reduce((m, r) => m.set(r.seller_tax_id, r), new Map<string, typeof rows[number]>()).values()
+  );
   const { error } = await client
     .from('seller_db')
-    .upsert(rows, { onConflict: 'seller_tax_id' });
+    .upsert(deduped, { onConflict: 'seller_tax_id' });
   if (error) console.warn('[SellerDB] upsertSellers failed:', error.message);
 }
 
