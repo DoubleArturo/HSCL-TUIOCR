@@ -33,6 +33,11 @@ import { parseERPRows } from './src/lib/erpParser';
 
 const BUYER_TAX_ID_REQUIRED = "16547744";
 
+function getDaysRemaining(updatedAt: string): number {
+    const expiry = new Date(updatedAt).getTime() + 90 * 24 * 60 * 60 * 1000;
+    return Math.ceil((expiry - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
 const App: React.FC = () => {
     // === Auth state ===
     const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
@@ -100,6 +105,10 @@ const App: React.FC = () => {
 
     const erpInputRef = useRef<HTMLInputElement>(null);
 
+    const [showRetentionBanner, setShowRetentionBanner] = useState(() =>
+        !sessionStorage.getItem('retention_warned')
+    );
+
     // Cleanup old files on startup
     useEffect(() => {
         fileStorageService.pruneOldFiles(30 * 24 * 60 * 60 * 1000).then(count => {
@@ -148,7 +157,7 @@ const App: React.FC = () => {
 
     const deleteProject = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
-        if (!confirm("確定要刪除此專案嗎？所有資料將無法復原。")) return;
+        if (!confirm("確定要刪除此專案嗎？\n\n・OCR 結果與稽核資料將永久刪除\n・Supabase Storage 上的原始憑證檔案也會一併刪除\n\n此操作無法復原。")) return;
         deleteProjectFromHook(id);
     };
 
@@ -204,9 +213,17 @@ const App: React.FC = () => {
 
     // --- Core Features ---
 
+    const markRetentionWarned = () => {
+        if (showRetentionBanner) {
+            sessionStorage.setItem('retention_warned', '1');
+            setShowRetentionBanner(false);
+        }
+    };
+
     const handleERPUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        markRetentionWarned();
 
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -571,6 +588,19 @@ const App: React.FC = () => {
                                                             {p.year}-{String(p.month).padStart(2, '0')}
                                                         </span>
                                                     )}
+                                                    {(() => {
+                                                        const days = getDaysRemaining(p.updatedAt);
+                                                        if (days > 30) return null;
+                                                        return (
+                                                            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                                                                days <= 7
+                                                                    ? 'bg-red-100 text-red-700'
+                                                                    : 'bg-amber-100 text-amber-700'
+                                                            }`}>
+                                                                {days <= 0 ? '即將到期' : `${days} 天後到期`}
+                                                            </span>
+                                                        );
+                                                    })()}
                                                 </div>
                                                 <div className="flex items-center gap-3 text-xs text-gray-400 mt-1 font-mono">
                                                     <span>最後更新: {new Date(p.updatedAt).toLocaleDateString()}</span>
@@ -737,7 +767,7 @@ const App: React.FC = () => {
                             <button onClick={() => fileInputRef.current?.click()} className="btn-sm btn-indigo">
                                 <Lucide.Upload className="w-3.5 h-3.5" /> 上傳/補件 (OCR)
                             </button>
-                            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/png,image/jpeg,application/pdf,image/tiff,.tif,.tiff" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
+                            <input type="file" ref={fileInputRef} className="hidden" multiple accept="image/png,image/jpeg,application/pdf,image/tiff,.tif,.tiff" onChange={(e) => { if (e.target.files) { markRetentionWarned(); handleFiles(e.target.files); } }} />
 
                             <div className="h-4 w-px bg-gray-200 mx-1"></div>
 
@@ -781,6 +811,24 @@ const App: React.FC = () => {
                 </div>
             </div>
 
+            {showRetentionBanner && (
+                <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-3">
+                    <Lucide.Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                    <p className="text-sm text-amber-800">
+                        <span className="font-bold">檔案保留提醒：</span>
+                        上傳的原始憑證（PDF/圖片）將在 60 天後自動刪除，OCR 結果與專案資料保留 90 天。
+                    </p>
+                    <button
+                        onClick={() => {
+                            sessionStorage.setItem('retention_warned', '1');
+                            setShowRetentionBanner(false);
+                        }}
+                        className="ml-auto text-amber-600 hover:text-amber-800 p-1 rounded"
+                    >
+                        <Lucide.X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
             <main className="max-w-[1920px] mx-auto w-full px-2 py-4 flex-1 overflow-hidden flex flex-col">
                 {!project || (project.erpData.length === 0 && project.invoices.length === 0) ? (
                     <div className="h-[60vh] flex flex-col items-center justify-center text-center">

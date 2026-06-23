@@ -10,6 +10,7 @@ import {
   upsertErpRecords,
   deleteProject as cloudDeleteProject,
 } from '../../services/cloudSyncService';
+import { pruneExpiredFilesForProject } from '../../services/cloudFileService';
 
 // ─── localStorage helpers (cache only) ───────────────────────────────────────
 
@@ -197,6 +198,8 @@ export function useProject() {
       };
       setProject(loaded);
       cacheWrite(loaded);
+      // lazy cleanup: fire-and-forget, never blocks load
+      pruneExpiredFilesForProject(id).catch(() => {});
     }
 
     // 3. Async rehydrate images from IndexedDB

@@ -145,6 +145,8 @@ export async function upsertInvoiceEntries(projectId: string, entries: InvoiceEn
     file_name: inv.file?.name ?? null,
     file_type: inv.file?.type ?? null,
     updated_at: new Date().toISOString(),
+    storage_path: (inv as any).storagePath ?? null,
+    uploaded_at: (inv as any).uploadedAt ?? new Date().toISOString(),
   }));
 
   // batch upsert in chunks of 200
@@ -172,7 +174,7 @@ export async function fetchInvoiceEntries(projectId: string): Promise<InvoiceEnt
 
   const { data, error } = await client
     .from('invoice_entries')
-    .select('id, status, data, error, file_name, file_type')
+    .select('id, status, data, error, file_name, file_type, storage_path, uploaded_at, file_deleted_at')
     .eq('project_id', projectId);
 
   if (error) { logSyncError('fetchInvoiceEntries', projectId, error); return []; }
@@ -185,6 +187,9 @@ export async function fetchInvoiceEntries(projectId: string): Promise<InvoiceEnt
     // file 和 previewUrl 由 IndexedDB rehydrate，這裡給空殼
     file: new File([], row.file_name || 'unknown', { type: row.file_type || 'image/jpeg' }),
     previewUrl: '',
+    storagePath: row.storage_path ?? undefined,
+    uploadedAt: row.uploaded_at ?? undefined,
+    fileDeletedAt: row.file_deleted_at ?? undefined,
   }));
 }
 

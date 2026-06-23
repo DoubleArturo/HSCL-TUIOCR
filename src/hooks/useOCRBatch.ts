@@ -4,6 +4,7 @@ import UTIF from 'utif';
 import { analyzeInvoice } from '../../services/geminiService';
 import { enhanceImageForOCR } from '../lib/imageEnhancement';
 import { fileStorageService } from '../../services/fileStorageService';
+import { uploadInvoiceFile } from '../../services/cloudFileService';
 import { logger } from '../../services/loggerService';
 import { AppStatus, InvoiceEntry, Project, ProcessingState, InvoiceData } from '../../types';
 import { clarityService, assessOCRQuality, ClarityScore, OCRQualityAssessment } from '../services/imageClarity';
@@ -151,6 +152,17 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
       } catch (err: any) {
         logger.error('FILE', `IndexedDB Save Failed for ${sanitizedId}`, err);
         alert(`儲存檔案至瀏覽器失敗 (${sanitizedId}): ${err?.name || 'Error'} - ${err?.message || '未知儲存空間錯誤。您的磁碟可能已滿，或是處於無痕模式。'}`);
+      }
+
+      // Upload original file to Supabase Storage (fire-and-forget)
+      if (project.id) {
+        uploadInvoiceFile(project.id, sanitizedId, processedFile).then(storagePath => {
+          if (storagePath) {
+            updateProjectInvoices(prev => prev.map(inv =>
+              inv.id === sanitizedId ? { ...inv, storagePath } : inv
+            ));
+          }
+        }).catch(() => {});
       }
 
       const previewUrl = shouldGeneratePreview ? URL.createObjectURL(processedFile) : '';
