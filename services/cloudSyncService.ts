@@ -172,7 +172,7 @@ export async function deleteInvoiceEntry(projectId: string, entryId: string): Pr
 export async function upsertErpRecords(projectId: string, records: ERPRecord[]): Promise<void> {
   const client = getClient();
   const user = getSession();
-  if (!user || records.length === 0) return;
+  if (!user) return;
 
   const { data: proj } = await client
     .from('audit_projects')
@@ -182,18 +182,36 @@ export async function upsertErpRecords(projectId: string, records: ERPRecord[]):
     .maybeSingle();
   if (!proj) { console.warn('[Cloud] upsertErpRecords: unauthorized projectId'); return; }
 
-  const rows = records.map(r => ({
+  // Delete existing records first — avoids ON CONFLICT issues entirely.
+  // Batch upsert ON CONFLICT fails when the same voucher_id appears in multiple
+  // ERP rows (one voucher → many invoices), even after client-side grouping,
+  // due to how PostgREST handles the VALUES clause.
+  const { error: delErr } = await client
+    .from('erp_records')
+    .delete()
+    .eq('project_id', projectId);
+  if (delErr) { console.warn('[Cloud] upsertErpRecords delete:', delErr.message); return; }
+
+  if (records.length === 0) return;
+
+  const grouped = new Map<string, ERPRecord[]>();
+  for (const r of records) {
+    const existing = grouped.get(r.voucher_id);
+    if (existing) existing.push(r);
+    else grouped.set(r.voucher_id, [r]);
+  }
+  const rows = Array.from(grouped.entries()).map(([voucher_id, group]) => ({
     project_id: projectId,
-    voucher_id: r.voucher_id,
-    data: r,
+    voucher_id,
+    data: group,
   }));
 
   for (let i = 0; i < rows.length; i += 200) {
     const chunk = rows.slice(i, i + 200);
     const { error } = await client
       .from('erp_records')
-      .upsert(chunk, { onConflict: 'project_id,voucher_id' });
-    if (error) console.warn('[Cloud] upsertErpRecords:', error.message);
+      .insert(chunk);
+    if (error) console.warn('[Cloud] upsertErpRecords insert:', error.message);
   }
 }
 
@@ -216,7 +234,7 @@ export async function fetchErpRecords(projectId: string): Promise<ERPRecord[]> {
     .eq('project_id', projectId);
 
   if (error) { console.warn('[Cloud] fetchErpRecords:', error.message); return []; }
-  return (data || []).map(row => row.data as ERPRecord);
+  return (data || []).flatMap(row => Array.isArray(row.data) ? row.data : [row.data]) as ERPRecord[];
 }
 
 // ─── Full Project Load ────────────────────────────────────────────────────────
