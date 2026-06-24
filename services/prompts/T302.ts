@@ -17,4 +17,5 @@ export const PROMPT_T302 = `
 - "收銀機統一發票" absent → NOT T302. Handwritten amounts → T300. QR codes + "電子發票" → T301.
 - Paper is a narrow thermal strip (長條型, ~7cm wide) → T500
 - Foreign Invoice without TW number → NOT_INVOICE
+- Image quality is too poor to CLEARLY read "收銀機統一發票" text → default to T300. Never guess T302 when the text is unclear.
 `;
