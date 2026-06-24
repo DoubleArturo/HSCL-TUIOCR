@@ -10,10 +10,12 @@ import InvoiceForm from './InvoiceForm';
 import { upsertSeller } from '../services/supabaseService';
 
 // Configure PDF worker
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
-  import.meta.url,
-).toString();
+if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+  pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url,
+  ).toString();
+}
 
 interface Props {
   entries: InvoiceEntry[];
