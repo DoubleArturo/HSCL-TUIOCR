@@ -100,7 +100,7 @@ export function useProject(userId?: string) {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [userId]);
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Cloud sync ────────────────────────────────────────────────────────────
 
@@ -111,7 +111,6 @@ export function useProject(userId?: string) {
       upsertInvoiceEntries(proj.id, proj.invoices),
       upsertErpRecords(proj.id, proj.erpData),
     ]);
-    // Refresh project list counts in background
     fetchProjectList().then(list => {
       setProjectList(list);
       cacheWriteList(list);
@@ -123,13 +122,11 @@ export function useProject(userId?: string) {
   const refreshListMeta = useCallback((proj: Project) => {
     setProjectList(prev => {
       const meta: ProjectMeta = {
-        id: proj.id,
-        name: proj.name,
+        id: proj.id, name: proj.name,
         updatedAt: new Date().toISOString(),
         invoiceCount: proj.invoices.length,
         erpCount: proj.erpData.length,
-        year: proj.year,
-        month: proj.month,
+        year: proj.year, month: proj.month,
       };
       const updated = [meta, ...prev.filter(p => p.id !== proj.id)];
       cacheWriteList(updated);
@@ -157,13 +154,10 @@ export function useProject(userId?: string) {
   const createProject = useCallback((name: string, year?: number, month?: number) => {
     const newProj: Project = {
       id: `proj_${Date.now()}`,
-      name,
-      invoices: [],
-      erpData: [],
+      name, invoices: [], erpData: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      year,
-      month,
+      year, month,
     };
     setProject(newProj);
     saveSnapshot(newProj);
@@ -192,7 +186,6 @@ export function useProject(userId?: string) {
     // 2. Fetch from Supabase (authoritative)
     const cloud = await fetchFullProject(id);
     if (!cloud) {
-      // No cloud data: fall back to cache only
       if (!cached) return false;
     } else {
       const loaded: Project = {
@@ -204,7 +197,6 @@ export function useProject(userId?: string) {
       };
       setProject(loaded);
       cacheWrite(loaded);
-      // lazy cleanup: fire-and-forget, never blocks load
       pruneExpiredFilesForProject(id).catch(() => {});
     }
 
@@ -227,7 +219,7 @@ export function useProject(userId?: string) {
 
     setProject(prev => prev ? { ...prev, invoices: updated } : null);
     return true;
-  }, []);
+  }, [userId]);
 
   const updateProjectMeta = useCallback((id: string, name: string, year: number, month: number) => {
     setProjectList(prev => {

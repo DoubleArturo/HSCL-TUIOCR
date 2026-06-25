@@ -13,6 +13,7 @@ interface UseOCRBatchOptions {
   project: Project | null;
   selectedModel: string;
   updateProjectInvoices: (updater: (prev: InvoiceEntry[]) => InvoiceEntry[]) => void;
+  onBatchComplete?: () => void;
 }
 
 interface UseOCRBatchReturn {
@@ -33,7 +34,7 @@ const fileToBase64 = (file: File): Promise<string> =>
   });
 
 export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
-  const { project, selectedModel, updateProjectInvoices } = options;
+  const { project, selectedModel, updateProjectInvoices, onBatchComplete } = options;
 
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [progress, setProgress] = useState<ProcessingState>({ current: 0, total: 0, status: 'IDLE' });
@@ -576,6 +577,7 @@ export function useOCRBatch(options: UseOCRBatchOptions): UseOCRBatchReturn {
     setStatus(AppStatus.IDLE);
     setProgress({ current: completedCount, total: totalItems, status: 'COMPLETED' });
     logger.info('QUEUE', `Batch completed. Processed ${completedCount}/${totalItems} items.`);
+    onBatchComplete?.();
 
     setTimeout(() => {
       setProgress(p => ({ ...p, status: 'IDLE' }));

@@ -5,6 +5,11 @@ function getClient() {
   catch { console.warn('[SellerDB] Supabase env vars not set — seller DB disabled'); return null; }
 }
 
+// Shared Supabase client for pages that need direct access (AuthPage, useAuth)
+export function getSupabaseClient() {
+  return getClient();
+}
+
 export interface SellerRow {
   id: string;
   seller_name: string;
@@ -98,10 +103,15 @@ export interface OCRCorrectionRecord {
   user_email?: string;
 }
 
-/**
- * Batch-insert OCR correction diffs for analytics.
- * Silently no-ops if Supabase is unavailable or corrections is empty.
- */
+export async function downloadInvoiceFile(storagePath: string): Promise<File | null> {
+  const client = getClient();
+  if (!client) return null;
+  const { data, error } = await client.storage.from('invoice-files').download(storagePath);
+  if (error || !data) { console.warn('[Storage] download failed:', error?.message); return null; }
+  const fileName = storagePath.split('/').pop() || 'invoice';
+  return new File([data], fileName, { type: data.type });
+}
+
 export async function recordOCRCorrections(corrections: OCRCorrectionRecord[]): Promise<void> {
   const client = getClient();
   if (!client || corrections.length === 0) return;
