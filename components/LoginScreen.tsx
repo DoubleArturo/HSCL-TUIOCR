@@ -20,21 +20,24 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
     setInfo(null);
     setLoading(true);
 
-    if (tab === 'login') {
-      const { user, error: err } = await login(email.trim(), password);
-      setLoading(false);
-      if (err) { setError(err); return; }
-      if (user) onLogin(user);
-    } else {
-      const { user, error: err } = await signup(email.trim(), password);
-      setLoading(false);
-      if (err) {
-        // Confirmation email sent is not a fatal error
-        if (err.includes('確認信')) { setInfo(err); return; }
-        setError(err);
-        return;
+    try {
+      if (tab === 'login') {
+        const { user, error: err } = await login(email.trim(), password);
+        if (err) { setError(err); return; }
+        if (user) onLogin(user);
+      } else {
+        const { user, error: err } = await signup(email.trim(), password);
+        if (err) {
+          if (err.includes('確認信')) { setInfo(err); return; }
+          setError(err);
+          return;
+        }
+        if (user) onLogin(user);
       }
-      if (user) onLogin(user);
+    } catch {
+      setError('發生未知錯誤，請重新整理後再試');
+    } finally {
+      setLoading(false);
     }
   };
 

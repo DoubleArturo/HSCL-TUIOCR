@@ -1,17 +1,8 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getSupabase } from './supabaseClient';
 
-let _supabase: SupabaseClient | null = null;
-
-function getClient(): SupabaseClient | null {
-  if (_supabase) return _supabase;
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) {
-    console.warn('[SellerDB] Supabase env vars not set — seller DB disabled');
-    return null;
-  }
-  _supabase = createClient(url, key);
-  return _supabase;
+function getClient() {
+  try { return getSupabase(); }
+  catch { console.warn('[SellerDB] Supabase env vars not set — seller DB disabled'); return null; }
 }
 
 export interface SellerRow {

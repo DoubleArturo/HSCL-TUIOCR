@@ -1,15 +1,4 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
-
-let _client: SupabaseClient | null = null;
-
-function getClient(): SupabaseClient {
-  if (_client) return _client;
-  _client = createClient(
-    import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_ANON_KEY,
-  );
-  return _client;
-}
+import { getSupabase } from './supabaseClient';
 
 export interface AppUser {
   id: string;
@@ -19,6 +8,19 @@ export interface AppUser {
 
 const SESSION_KEY = 'auth_user';
 let _cached: AppUser | null = null;
+
+// Keep _cached in sync with the shared Supabase client's auth state.
+// This fires on signIn, signOut, and token refresh — eliminates the stale-cache
+// race condition that caused account-switch data leaks.
+getSupabase().auth.onAuthStateChange((_event, session) => {
+  if (!session?.user) {
+    _cached = null;
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  } else {
+    _cached = { id: session.user.id, email: session.user.email ?? '', is_admin: false };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(_cached)); } catch { /* quota full */ }
+  }
+});
 
 export function getSession(): AppUser | null {
   if (_cached) return _cached;
@@ -31,63 +33,69 @@ export function getSession(): AppUser | null {
   }
 }
 
-function saveSession(user: AppUser): void {
-  _cached = user;
-  localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-}
-
 export async function clearSession(): Promise<void> {
   _cached = null;
-  localStorage.removeItem(SESSION_KEY);
-  await getClient().auth.signOut();
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  await getSupabase().auth.signOut();
 }
 
 // Called on app load to verify the Supabase session is still valid.
 export async function initSession(): Promise<AppUser | null> {
-  const { data: { session } } = await getClient().auth.getSession();
+  const { data: { session } } = await getSupabase().auth.getSession();
   if (!session?.user) {
     _cached = null;
-    localStorage.removeItem(SESSION_KEY);
+    try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
     return null;
   }
-  const user: AppUser = {
-    id: session.user.id,
-    email: session.user.email ?? '',
-    is_admin: false,
-  };
-  saveSession(user);
-  return user;
+  _cached = { id: session.user.id, email: session.user.email ?? '', is_admin: false };
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(_cached)); } catch { /* quota full */ }
+  return _cached;
 }
 
 export async function login(
   email: string,
   password: string,
 ): Promise<{ user: AppUser | null; error: string | null }> {
-  const { data, error } = await getClient().auth.signInWithPassword({ email, password });
-  if (error) return { user: null, error: error.message };
-  if (!data.user) return { user: null, error: '登入失敗，請再試一次' };
-  const user: AppUser = { id: data.user.id, email: data.user.email ?? email, is_admin: false };
-  saveSession(user);
-  return { user, error: null };
+  try {
+    const { data, error } = await getSupabase().auth.signInWithPassword({ email, password });
+    if (error) return { user: null, error: error.message };
+    if (!data.user) return { user: null, error: '登入失敗，請再試一次' };
+    // onAuthStateChange will update _cached; set it here too for immediate consistency
+    _cached = { id: data.user.id, email: data.user.email ?? email, is_admin: false };
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(_cached)); } catch { /* quota full */ }
+    return { user: _cached, error: null };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/quota/i.test(msg)) {
+      return { user: null, error: '瀏覽器儲存空間已滿，請清除瀏覽器快取或 Cookie 後再試' };
+    }
+    return { user: null, error: '登入失敗，請再試一次' };
+  }
 }
 
 export async function signup(
   email: string,
   password: string,
 ): Promise<{ user: AppUser | null; error: string | null }> {
-  const { data, error } = await getClient().auth.signUp({ email, password });
-  if (error) return { user: null, error: error.message };
-  if (!data.user) return { user: null, error: '建立帳號失敗，請再試一次' };
+  try {
+    const { data, error } = await getSupabase().auth.signUp({ email, password });
+    if (error) return { user: null, error: error.message };
+    if (!data.user) return { user: null, error: '建立帳號失敗，請再試一次' };
 
-  if (data.session) {
-    // Email confirmation disabled — auto-logged in
-    const user: AppUser = { id: data.user.id, email: data.user.email ?? email, is_admin: false };
-    saveSession(user);
-    return { user, error: null };
+    if (data.session) {
+      _cached = { id: data.user.id, email: data.user.email ?? email, is_admin: false };
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify(_cached)); } catch { /* quota full */ }
+      return { user: _cached, error: null };
+    }
+
+    return { user: null, error: '確認信已寄出，請點擊信件中的連結後再登入' };
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/quota/i.test(msg)) {
+      return { user: null, error: '瀏覽器儲存空間已滿，請清除瀏覽器快取或 Cookie 後再試' };
+    }
+    return { user: null, error: '建立帳號失敗，請再試一次' };
   }
-
-  // Email confirmation required
-  return { user: null, error: '確認信已寄出，請點擊信件中的連結後再登入' };
 }
 
 // ─── Admin stubs (not supported without service-role key) ────────────────────
