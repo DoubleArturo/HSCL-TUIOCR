@@ -103,15 +103,6 @@ export interface OCRCorrectionRecord {
   user_email?: string;
 }
 
-export async function downloadInvoiceFile(storagePath: string): Promise<File | null> {
-  const client = getClient();
-  if (!client) return null;
-  const { data, error } = await client.storage.from('invoice-files').download(storagePath);
-  if (error || !data) { console.warn('[Storage] download failed:', error?.message); return null; }
-  const fileName = storagePath.split('/').pop() || 'invoice';
-  return new File([data], fileName, { type: data.type });
-}
-
 export async function recordOCRCorrections(corrections: OCRCorrectionRecord[]): Promise<void> {
   const client = getClient();
   if (!client || corrections.length === 0) return;

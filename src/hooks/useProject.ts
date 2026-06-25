@@ -204,7 +204,7 @@ export function useProject(userId?: string) {
     const base = cloud ?? cached!;
     const updated = await Promise.all(base.invoices.map(async (inv: any) => {
       try {
-        const dbFile = await fileStorageService.getFile(inv.id);
+        const dbFile = await fileStorageService.getFileWithCloudFallback(inv.id, inv.storagePath);
         if (dbFile) return { ...inv, file: dbFile, previewUrl: URL.createObjectURL(dbFile) };
       } catch (err: any) {
         logger.error('FILE', `IndexedDB Load Failed for ${inv.id}`, err);

@@ -100,9 +100,11 @@ export const fileStorageService = {
         if (local) return local;
         if (!storagePath) return null;
         try {
-            const { downloadInvoiceFile } = await import('./supabaseService');
-            const cloudFile = await downloadInvoiceFile(storagePath);
-            if (cloudFile) {
+            const { downloadInvoiceFile } = await import('./cloudFileService');
+            const blob = await downloadInvoiceFile(storagePath);
+            if (blob) {
+                const fileName = storagePath.split('/').pop() || 'invoice';
+                const cloudFile = new File([blob], fileName, { type: blob.type });
                 await this.saveFile(invoiceId, cloudFile); // cache locally
                 return cloudFile;
             }
