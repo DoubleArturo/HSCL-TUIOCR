@@ -54,7 +54,28 @@ describe('validateInvoice()', () => {
     });
   });
 
-  // b) amount arithmetic
+  // b) GUI_LENGTH — 9 碼 / 11 碼
+  describe('invoice_number GUI_LENGTH rule (9 or 11 chars)', () => {
+    it('9 碼發票號（缺 1 位）→ 同時觸發 GUI_FORMAT 和 GUI_LENGTH', () => {
+      const failures = validateInvoice(makeInvoice({ invoice_number: 'AB1234567' }));
+      expect(failures.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+      expect(failures.some(f => f.rule === 'GUI_LENGTH')).toBe(true);
+    });
+
+    it('11 碼發票號（多 1 位）→ 同時觸發 GUI_FORMAT 和 GUI_LENGTH', () => {
+      const failures = validateInvoice(makeInvoice({ invoice_number: 'AB123456789' }));
+      expect(failures.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+      expect(failures.some(f => f.rule === 'GUI_LENGTH')).toBe(true);
+    });
+
+    it('8 碼發票號（缺 2 位）→ 觸發 GUI_FORMAT 但不觸發 GUI_LENGTH（僅 9/11 觸發）', () => {
+      const fail8 = validateInvoice(makeInvoice({ invoice_number: 'AB123456' }));
+      expect(fail8.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
+      expect(fail8.some(f => f.rule === 'GUI_LENGTH')).toBe(false);
+    });
+  });
+
+  // c) amount arithmetic
   describe('amount arithmetic', () => {
     it('正確: 1000 + 100 = 1100 — 無失敗', () => {
       const failures = validateInvoice(
@@ -230,6 +251,13 @@ describe('autoCorrectAmounts()', () => {
       expect(item.amount_tax).toBe(100);
       expect(result.log.toLowerCase()).toContain('swapped');
     });
+
+    it('total=0 時不觸發 swap（條件需 total > 0）', () => {
+      const item = makeInvoice({ amount_sales: 0, amount_tax: 100, amount_total: 0 });
+      const result = autoCorrectAmounts(item);
+      expect(result.corrected).toBe(false);
+      expect(item.amount_total).toBe(0);
+    });
   });
 
   // b) 加總修正（誤差閾值）
@@ -253,12 +281,27 @@ describe('autoCorrectAmounts()', () => {
       expect(item.amount_total).toBe(1100);
       expect(result.log.toLowerCase()).toContain('auto-corrected');
     });
+
+    it('誤差恰好 =51（超過閾值 1）— corrected=false（不修正）', () => {
+      const item = makeInvoice({ amount_sales: 1000, amount_tax: 100, amount_total: 1049 });
+      const result = autoCorrectAmounts(item);
+      expect(result.corrected).toBe(false);
+      expect(item.amount_total).toBe(1049);
+      expect(result.log).toContain('exceeds');
+    });
   });
 
   // c) 不需修正
   describe('不需修正', () => {
     it('amount_total 已正確 — corrected=false, log=空字串', () => {
       const item = makeInvoice({ amount_sales: 1000, amount_tax: 100, amount_total: 1100 });
+      const result = autoCorrectAmounts(item);
+      expect(result.corrected).toBe(false);
+      expect(result.log).toBe('');
+    });
+
+    it('誤差恰好 =1（容差範圍，視為無誤差）— corrected=false', () => {
+      const item = makeInvoice({ amount_sales: 1000, amount_tax: 100, amount_total: 1099 });
       const result = autoCorrectAmounts(item);
       expect(result.corrected).toBe(false);
       expect(result.log).toBe('');
@@ -272,5 +315,31 @@ describe('autoCorrectAmounts()', () => {
       const result = autoCorrectAmounts(item);
       expect(result.corrected).toBe(false);
     });
+  });
+});
+
+// ===== T500/TXXX/T400 invoice_number 格式檢查豁免 =====
+describe('validateInvoice() - 特殊稅別跳過發票號碼格式驗證', () => {
+  // 這三種稅別的發票號碼格式不是台灣 2L+8D，不應觸發 GUI_FORMAT / GUI_LENGTH
+  const exemptTypes: Array<{ tax_code: string; invoice_number: string; desc: string }> = [
+    { tax_code: 'T500', invoice_number: '2903201198093', desc: 'T500 交通票券 13 碼條碼' },
+    { tax_code: 'T500', invoice_number: '10-1-02-0-125-0188', desc: 'T500 票根含破折號' },
+    { tax_code: 'TXXX', invoice_number: 'RECEIPT-2026-001', desc: 'TXXX 收據自訂號碼' },
+    { tax_code: 'TXXX', invoice_number: 'BE15265E2121', desc: 'TXXX 含數字+字母混合' },
+    { tax_code: 'T400', invoice_number: 'CXI31150202400', desc: 'T400 海關進口證明 ID' },
+  ];
+
+  exemptTypes.forEach(({ tax_code, invoice_number, desc }) => {
+    it(`${desc} (${tax_code}) — 不觸發 GUI_FORMAT`, () => {
+      const item = makeInvoice({ tax_code: tax_code as any, invoice_number });
+      const failures = validateInvoice(item);
+      expect(failures.filter(f => f.rule === 'GUI_FORMAT' || f.rule === 'GUI_LENGTH')).toHaveLength(0);
+    });
+  });
+
+  it('T302 一般發票 AB123456789（11 碼）仍應觸發 GUI_FORMAT', () => {
+    const item = makeInvoice({ tax_code: 'T302' as any, invoice_number: 'AB123456789' });
+    const failures = validateInvoice(item);
+    expect(failures.some(f => f.rule === 'GUI_FORMAT')).toBe(true);
   });
 });

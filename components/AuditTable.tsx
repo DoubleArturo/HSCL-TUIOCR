@@ -49,18 +49,21 @@ const AuditTable: React.FC<AuditTableProps> = ({ auditList, selectedKey, onRowCl
           </thead>
           <tbody className="divide-y divide-gray-50 text-[13px]">
             {auditList.map((row) => {
-              const isMismatch = row.auditStatus === 'MISMATCH';
+              const isProcessing = row.file?.status === 'PROCESSING';
+              // 辨識中的行：不顯示 MISMATCH，避免使用者在結果出來之前誤判為錯誤
+              const isMismatch = row.auditStatus === 'MISMATCH' && !isProcessing;
+              const isNeedsReview = row.auditStatus === 'NEEDS_REVIEW' && !isProcessing;
               let isMissing = row.auditStatus === 'MISSING_FILE';
-              const isMatch = row.auditStatus === 'MATCH';
+              const isMatch = (row.auditStatus === 'MATCH') && !isProcessing;
               const isSkipped = row.auditStatus === 'SKIPPED';
               const isPending = row.file?.status === 'PENDING';
               const hasOcrButNoFile = row.file && !row.file.previewUrl && row.file.status === 'SUCCESS';
 
-              if (isPending) isMissing = false;
+              if (isPending || isProcessing) isMissing = false;
               const isInvoiceRow = row.ocr?.voucher_type === 'Invoice' || row.ocr?.document_type === 'Invoice' || row.ocr?.document_type === 'Commercial Invoice';
 
               return (
-                <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending && !isInvoiceRow ? 'bg-rose-50/40' : ''} ${isMissing ? 'bg-slate-50' : ''} ${isSkipped ? 'bg-gray-100/30' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
+                <tr key={row.key} className={`group hover:bg-gray-50 transition-colors ${isMismatch && !isPending && !isProcessing && !isInvoiceRow ? 'bg-rose-50/40' : ''} ${isNeedsReview && !isInvoiceRow ? 'bg-amber-50/30' : ''} ${isMissing ? 'bg-slate-50' : ''} ${isSkipped ? 'bg-gray-100/30' : ''} ${isProcessing ? 'bg-indigo-50/20' : ''} ${row.erp?.erpFlagged ? 'bg-amber-50/60' : ''}`}>
                   <td className={`pl-4 py-3 font-mono font-bold whitespace-nowrap ${isMissing || isPending ? 'text-slate-400' : 'text-slate-700'}`}>
                     <div className="flex items-center gap-1.5">
                       <span>{row.id}</span>
@@ -95,12 +98,14 @@ const AuditTable: React.FC<AuditTableProps> = ({ auditList, selectedKey, onRowCl
                   <td className={`px-1 py-3 text-center font-mono border-r border-gray-100 ${!isInvoiceRow && row.diffDetails.includes('tax_id') ? 'text-rose-600 font-bold' : (isMissing ? 'text-slate-300' : 'text-slate-500')}`}>{row.erp?.seller_tax_id || '-'}</td>
                   <td className="px-1 py-3 text-center border-r border-gray-100 align-middle">
                     <div className="flex flex-col items-center gap-1">
-                      {isPending && <><Lucide.Clock className="w-4 h-4 text-amber-500" /><span className="text-[9px] text-amber-600 font-bold mt-0.5">待解析</span></>}
-                      {!isPending && isInvoiceRow && <CheckCircle2 className="w-5 h-5 text-slate-300" />}
-                      {!isPending && !isInvoiceRow && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
-                      {!isPending && !isInvoiceRow && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
-                      {!isPending && isSkipped && <><CheckCircle2 className="w-5 h-5 text-slate-400" /><span className="text-[9px] text-slate-500 font-bold mt-0.5">已跳過</span></>}
-                      {isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
+                      {isProcessing && <><Loader2 className="w-4 h-4 animate-spin text-indigo-400" /><span className="text-[9px] text-indigo-500 font-bold mt-0.5">辨識中</span></>}
+                      {!isProcessing && isPending && <><Lucide.Clock className="w-4 h-4 text-amber-500" /><span className="text-[9px] text-amber-600 font-bold mt-0.5">待解析</span></>}
+                      {!isProcessing && !isPending && isInvoiceRow && <CheckCircle2 className="w-5 h-5 text-slate-300" />}
+                      {!isProcessing && !isPending && !isInvoiceRow && isMatch && <CheckCircle2 className="w-5 h-5 text-emerald-500" />}
+                      {!isProcessing && !isPending && !isInvoiceRow && isMismatch && <AlertTriangle className="w-5 h-5 text-rose-500" />}
+                      {!isProcessing && !isPending && !isInvoiceRow && isNeedsReview && <><Lucide.Eye className="w-4 h-4 text-amber-500" /><span className="text-[9px] text-amber-600 font-bold mt-0.5">待確認</span></>}
+                      {!isProcessing && !isPending && isSkipped && <><CheckCircle2 className="w-5 h-5 text-slate-400" /><span className="text-[9px] text-slate-500 font-bold mt-0.5">已跳過</span></>}
+                      {!isProcessing && isMissing && <><UploadCloud className="w-4 h-4 text-slate-300" /><span className="text-[9px] text-slate-400 font-bold mt-0.5">缺件</span></>}
 
                       {!isMissing && (row.ocr?.voucher_type || row.ocr?.document_type) && (
                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded leading-none text-center whitespace-nowrap ${

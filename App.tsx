@@ -1,5 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
+import { Loader2, CheckCircle2, Edit3, Trash2, PlusSquare, ArrowLeftRight, UploadCloud, FolderOpen, ChevronRight, Calendar, Database, Search, Plus, LogOut, Users } from 'lucide-react';
 import { analyzeInvoice } from './services/geminiService';
 import { enhanceImageForOCR } from './src/lib/imageEnhancement';
 import { InvoiceData, ProjectMeta } from './types';
@@ -8,12 +9,6 @@ import * as XLSX from 'xlsx';
 import { useProject } from './src/hooks/useProject';
 import { useOCRBatch } from './src/hooks/useOCRBatch';
 import { useAuth } from './src/hooks/useAuth';
-import { fileStorageService } from './services/fileStorageService';
-import { upsertSellers } from './services/supabaseService';
-import { logger } from './services/loggerService';
-import { useAuditList } from './src/hooks/useAuditList';
-import { buildAuditCSV, downloadCSV } from './src/lib/csvExport';
-import { parseERPRows } from './src/lib/erpParser';
 import ProjectListPage from './src/pages/ProjectListPage';
 import SellerDBPage from './src/pages/SellerDBPage';
 import WorkspacePage from './src/pages/WorkspacePage';
@@ -27,9 +22,38 @@ declare global {
     interface Window { aistudio?: AIStudio; }
 }
 
+import { fileStorageService } from './services/fileStorageService';
+import { fetchAllSellerRows, upsertSeller, deleteSeller, upsertSellers, SellerRow, recordOCRCorrections, OCRCorrectionRecord } from './services/supabaseService';
+import { logger } from './services/loggerService';
+import { getSession, clearSession, initSession, AppUser } from './services/authService';
+import LoginScreen from './components/LoginScreen';
+import AdminPage from './components/AdminPage';
+import { useAuditList } from './src/hooks/useAuditList';
+import { buildAuditCSV, downloadCSV } from './src/lib/csvExport';
+import { parseERPRows } from './src/lib/erpParser';
+
+const BUYER_TAX_ID_REQUIRED = "16547744";
+
+function getDaysRemaining(updatedAt: string): number {
+    const expiry = new Date(updatedAt).getTime() + 90 * 24 * 60 * 60 * 1000;
+    return Math.ceil((expiry - Date.now()) / (24 * 60 * 60 * 1000));
+}
+
 const App: React.FC = () => {
-    const { user, loading: authLoading, signOut } = useAuth();
-    const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB'>('PROJECT_LIST');
+    // === Auth state ===
+    const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getSession());
+    const [authLoading, setAuthLoading] = useState(true);
+    const [view, setView] = useState<'PROJECT_LIST' | 'WORKSPACE' | 'ERROR_REVIEW' | 'SELLER_DB' | 'ADMIN'>('PROJECT_LIST');
+
+    // Verify session with Supabase on mount (handles page refresh)
+    useEffect(() => {
+        initSession().then(user => {
+            setCurrentUser(user);
+            setAuthLoading(false);
+        });
+    }, []);
+
+    // === All remaining hooks — must run before any early return ===
     const {
         projectList,
         project,
@@ -41,7 +65,9 @@ const App: React.FC = () => {
         toggleErpFlag,
         updateProjectMeta,
         setProject,
-    } = useProject(user?.id);
+        saveSnapshot,
+        forceSave,
+    } = useProject(currentUser?.id);
 
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);
@@ -51,12 +77,37 @@ const App: React.FC = () => {
         project,
         selectedModel,
         updateProjectInvoices: updateInvoices,
+        onBatchComplete: forceSave,
     });
 
-    const [editingProject, setEditingProject] = useState<ProjectMeta | null>(null);
+    const { auditList, metrics } = useAuditList(project, batchStats.totalDuration);
+
+    const [isCreating, setIsCreating] = useState(false);
+    const [createYear, setCreateYear] = useState(new Date().getFullYear());
+    const [createMonth, setCreateMonth] = useState(new Date().getMonth() + 1);
+    const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
+    const [editName, setEditName] = useState('');
+    const [editYear, setEditYear] = useState(0);
+    const [editMonth, setEditMonth] = useState(0);
+
+    // Seller DB state
+    const [sellerRows, setSellerRows] = useState<SellerRow[]>([]);
+    const [sellerSearchQuery, setSellerSearchQuery] = useState('');
+    const [sellerDbLoading, setSellerDbLoading] = useState(false);
+    const [isAddingNewSeller, setIsAddingNewSeller] = useState(false);
+    const [newSellerName, setNewSellerName] = useState('');
+    const [newSellerTaxId, setNewSellerTaxId] = useState('');
 
     const erpInputRef = useRef<HTMLInputElement>(null);
 
+    const [showRetentionBanner, setShowRetentionBanner] = useState(() =>
+        !sessionStorage.getItem('retention_warned')
+    );
+
+    // For ProjectListPage / WorkspacePage edit modal compatibility
+    const [editingProject, setEditingProject] = useState<ProjectMeta | null>(null);
+
+    // Cleanup old files on startup
     useEffect(() => {
         fileStorageService.pruneOldFiles(30 * 24 * 60 * 60 * 1000).then(count => {
             if (count > 0) console.log(`Cleaned up ${count} old temporary files`);
@@ -67,7 +118,20 @@ const App: React.FC = () => {
         checkKey();
     }, []);
 
-    // --- Project Management ---
+    // === Early returns — after ALL hooks ===
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-slate-50">
+                <span className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+            </div>
+        );
+    }
+
+    if (!currentUser) {
+        return <LoginScreen onLogin={user => setCurrentUser(user)} />;
+    }
+
+    // --- Project Management Functions ---
 
     const handleCreateProject = (year: number, month: number) => {
         const name = `${year}-${String(month).padStart(2, '0')}月 進項發票`;
@@ -85,7 +149,7 @@ const App: React.FC = () => {
 
     const deleteProject = (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
-        if (!confirm("確定要刪除此專案嗎？所有資料將無法復原。")) return;
+        if (!confirm("確定要刪除此專案嗎？\n\n・OCR 結果與稽核資料將永久刪除\n・Supabase Storage 上的原始憑證檔案也會一併刪除\n\n此操作無法復原。")) return;
         deleteProjectFromHook(id);
     };
 
@@ -116,9 +180,20 @@ const App: React.FC = () => {
         });
     };
 
+    // --- Core Features ---
+
+    const markRetentionWarned = () => {
+        if (showRetentionBanner) {
+            sessionStorage.setItem('retention_warned', '1');
+            setShowRetentionBanner(false);
+        }
+    };
+
+
     const handleERPUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        markRetentionWarned();
 
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -163,15 +238,46 @@ const App: React.FC = () => {
     });
 
     const handleSave = (id: string, updatedData: InvoiceData) => {
-        updateInvoices(prev => prev.map(inv => {
-            if (inv.id === id) {
-                const newData = [...inv.data];
-                if (newData.length > 0) newData[0] = updatedData;
-                else newData.push(updatedData);
-                return { ...inv, data: newData };
+        updateInvoices(prev => {
+            // OCR correction feedback loop — fire-and-forget, never throws
+            const _original = prev.find(inv => inv.id === id)?.data[0];
+            if (_original) {
+                const TRACKED: Array<keyof InvoiceData> = [
+                    'invoice_number', 'invoice_date', 'seller_name', 'seller_tax_id',
+                    'buyer_tax_id', 'amount_sales', 'amount_tax', 'amount_total',
+                    'tax_code', 'voucher_type',
+                ];
+                const diffs: OCRCorrectionRecord[] = [];
+                for (const f of TRACKED) {
+                    const from = String(_original[f] ?? '');
+                    const to   = String(updatedData[f] ?? '');
+                    if (from !== to && to) {
+                        diffs.push({
+                            file_id: id,
+                            voucher_id: project?.erpData?.find(
+                                e => id === e.voucher_id || id.startsWith(e.voucher_id + '-') || id.startsWith(e.voucher_id + '_')
+                            )?.voucher_id,
+                            tax_code: _original.tax_code,
+                            voucher_type: _original.voucher_type ?? undefined,
+                            field_name: f,
+                            original_value: from || null,
+                            corrected_value: to,
+                        });
+                    }
+                }
+                if (diffs.length > 0) recordOCRCorrections(diffs).catch(() => {});
             }
-            return inv;
-        }));
+
+            return prev.map(inv => {
+                if (inv.id === id) {
+                    const newData = [...inv.data];
+                    if (newData.length > 0) newData[0] = updatedData;
+                    else newData.push(updatedData);
+                    return { ...inv, data: newData };
+                }
+                return inv;
+            });
+        });
         setSelectedKey(null);
     };
 
@@ -235,8 +341,6 @@ const App: React.FC = () => {
         }
     };
 
-    const { auditList, metrics } = useAuditList(project, batchStats.totalDuration);
-
     const exportAuditReport = () => {
         if (auditList.length === 0) return;
         const csv = buildAuditCSV(auditList, {
@@ -255,19 +359,8 @@ const App: React.FC = () => {
 
     // --- Views ---
 
-    if (authLoading) {
-        return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-3 text-gray-400">
-                    <div className="w-8 h-8 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm font-medium">載入中...</span>
-                </div>
-            </div>
-        );
-    }
-
-    if (!user) {
-        return <AuthPage />;
+    if (view === 'ADMIN') {
+        return <AdminPage currentUser={currentUser} onBack={() => setView('PROJECT_LIST')} />;
     }
 
     if (view === 'ERROR_REVIEW' && project) {
@@ -298,8 +391,8 @@ const App: React.FC = () => {
                 onStartEditing={startEditingProject}
                 onSaveEdit={saveProjectEdit}
                 onCancelEdit={cancelProjectEdit}
-                userEmail={user.email}
-                onSignOut={signOut}
+                userEmail={currentUser.email}
+                onSignOut={() => clearSession().then(() => setCurrentUser(null))}
             />
         );
     }

@@ -3,12 +3,16 @@ import type { Project, ProjectMeta, InvoiceEntry, ERPRecord } from '../../types'
 import { fileStorageService } from '../../services/fileStorageService';
 import { logger } from '../../services/loggerService';
 import {
-  fetchCloudProjects,
-  fetchCloudProject,
-  saveProjectToCloud,
-  deleteCloudProject,
-  uploadInvoiceFile,
-} from '../../services/supabaseService';
+  fetchProjectList,
+  fetchFullProject,
+  upsertProject,
+  upsertInvoiceEntries,
+  upsertErpRecords,
+  deleteProject as cloudDeleteProject,
+} from '../../services/cloudSyncService';
+import { pruneExpiredFilesForProject } from '../../services/cloudFileService';
+
+// ─── localStorage helpers (cache only) ───────────────────────────────────────
 
 function serializeProject(proj: Project): object {
   return {
@@ -22,6 +26,32 @@ function serializeProject(proj: Project): object {
   };
 }
 
+function cacheWrite(proj: Project) {
+  try {
+    localStorage.setItem(`project_${proj.id}`, JSON.stringify(serializeProject(proj)));
+  } catch { /* quota exceeded — cache write is best-effort */ }
+}
+
+function cacheRead(id: string): Project | null {
+  try {
+    const raw = localStorage.getItem(`project_${id}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function cacheWriteList(list: ProjectMeta[]) {
+  try { localStorage.setItem('project_list', JSON.stringify(list)); } catch { /* best-effort */ }
+}
+
+function cacheReadList(): ProjectMeta[] {
+  try {
+    const raw = localStorage.getItem('project_list');
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
 export function useProject(userId?: string) {
   const [projectList, setProjectList] = useState<ProjectMeta[]>([]);
   const [project, setProject] = useState<Project | null>(null);
@@ -34,47 +64,62 @@ export function useProject(userId?: string) {
     if (project) isDirtyRef.current = true;
   }, [project]);
 
-  // Load project list (cloud if logged in, else localStorage)
+  // Re-fetch project list whenever the logged-in user changes.
+  // Clearing projectList immediately prevents showing a previous user's stale cache.
   useEffect(() => {
-    if (userId) {
-      fetchCloudProjects(userId).then(cloudList => {
-        if (cloudList.length > 0) {
-          // Cloud has data — it's the source of truth
-          setProjectList(cloudList);
-          localStorage.setItem('project_list', JSON.stringify(cloudList));
-        } else {
-          // Cloud is empty (first login or no cloud projects yet).
-          // Fall back to any existing localStorage data so the user still
-          // sees their locally-cached projects.
-          const stored = localStorage.getItem('project_list');
-          if (stored) {
-            try { setProjectList(JSON.parse(stored)); } catch { /* ignore */ }
-          }
-        }
-      }).catch(() => {
-        // Network error: fall back to localStorage cache
-        const stored = localStorage.getItem('project_list');
-        if (stored) setProjectList(JSON.parse(stored));
-      });
-    } else {
-      const stored = localStorage.getItem('project_list');
-      if (stored) setProjectList(JSON.parse(stored));
-    }
+    setProjectList([]);
+    setProject(null);
+    if (!userId) return;
 
-    // Auto-save interval (10s)
+    const cached = cacheReadList();
+    if (cached.length > 0) setProjectList(cached);
+
+    fetchProjectList().then(list => {
+      setProjectList(list);
+      cacheWriteList(list);
+    });
+
+    // Auto-save dirty state every 10s
     const interval = setInterval(() => {
       if (isDirtyRef.current && latestProjectRef.current) {
-        saveSnapshot(latestProjectRef.current);
+        syncProject(latestProjectRef.current);
         isDirtyRef.current = false;
       }
     }, 10000);
-    return () => clearInterval(interval);
+
+    // Force-save when tab is hidden (handles Chrome Memory Saver / tab switching)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && isDirtyRef.current && latestProjectRef.current) {
+        syncProject(latestProjectRef.current);
+        isDirtyRef.current = false;
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const saveSnapshot = useCallback((proj: Project) => {
-    // 1. localStorage (always, as local cache)
-    const serializable = serializeProject(proj);
-    localStorage.setItem(`project_${proj.id}`, JSON.stringify(serializable));
+  // ─── Cloud sync ────────────────────────────────────────────────────────────
+
+  const syncProject = useCallback(async (proj: Project) => {
+    cacheWrite(proj);
+    await upsertProject(proj);
+    await Promise.all([
+      upsertInvoiceEntries(proj.id, proj.invoices),
+      upsertErpRecords(proj.id, proj.erpData),
+    ]);
+    fetchProjectList().then(list => {
+      setProjectList(list);
+      cacheWriteList(list);
+    });
+  }, []);
+
+  // ─── Project list metadata update helper ──────────────────────────────────
+
+  const refreshListMeta = useCallback((proj: Project) => {
     setProjectList(prev => {
       const meta: ProjectMeta = {
         id: proj.id, name: proj.name,
@@ -84,17 +129,27 @@ export function useProject(userId?: string) {
         year: proj.year, month: proj.month,
       };
       const updated = [meta, ...prev.filter(p => p.id !== proj.id)];
-      localStorage.setItem('project_list', JSON.stringify(updated));
+      cacheWriteList(updated);
       return updated;
     });
+  }, []);
 
-    // 2. Cloud sync (non-blocking, best-effort)
-    if (userId) {
-      saveProjectToCloud(userId, proj).catch(e =>
-        console.warn('[Cloud] auto-save failed:', e)
-      );
+  // ─── Public API ────────────────────────────────────────────────────────────
+
+  const saveSnapshot = useCallback((proj: Project) => {
+    cacheWrite(proj);
+    refreshListMeta(proj);
+    upsertProject(proj);
+    upsertInvoiceEntries(proj.id, proj.invoices);
+    upsertErpRecords(proj.id, proj.erpData);
+  }, [refreshListMeta]);
+
+  const forceSave = useCallback(() => {
+    if (latestProjectRef.current) {
+      saveSnapshot(latestProjectRef.current);
+      isDirtyRef.current = false;
     }
-  }, [userId]);
+  }, [saveSnapshot]);
 
   const createProject = useCallback((name: string, year?: number, month?: number) => {
     const newProj: Project = {
@@ -113,51 +168,41 @@ export function useProject(userId?: string) {
     id: string,
     onError?: (invId: string, err: any) => void,
   ): Promise<boolean> => {
-    // Try cloud first (if logged in)
-    if (userId) {
-      try {
-        const cloudProject = await fetchCloudProject(userId, id);
-        if (cloudProject) {
-          setProject(cloudProject);
-
-          // Rehydrate files: IndexedDB cache → Supabase Storage fallback
-          const updated = await Promise.all(cloudProject.invoices.map(async (inv) => {
-            try {
-              const file = await fileStorageService.getFileWithCloudFallback(inv.id, inv.storagePath);
-              if (file) return { ...inv, file, previewUrl: URL.createObjectURL(file) };
-            } catch (err: any) {
-              logger.error('FILE', `Load failed for ${inv.id}`, err);
-              onError?.(inv.id, err);
-            }
-            return inv;
-          }));
-          setProject(prev => prev ? { ...prev, invoices: updated } : null);
-
-          // Sync to localStorage cache
-          const serializable = serializeProject({ ...cloudProject, invoices: updated });
-          localStorage.setItem(`project_${id}`, JSON.stringify(serializable));
-          return true;
-        }
-      } catch (e) {
-        console.warn('[Cloud] loadProject failed, falling back to localStorage:', e);
-      }
+    // 1. Show cached version instantly if available
+    const cached = cacheRead(id);
+    if (cached) {
+      const preloaded: Project = {
+        ...cached,
+        invoices: cached.invoices.map((inv: any) => ({
+          ...inv,
+          status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status,
+          file: new File([], inv.file?.name || 'unknown', { type: inv.file?.type || 'image/jpeg' }),
+          previewUrl: '',
+        })),
+      };
+      setProject(preloaded);
     }
 
-    // Fall back to localStorage
-    const data = localStorage.getItem(`project_${id}`);
-    if (!data) return false;
+    // 2. Fetch from Supabase (authoritative)
+    const cloud = await fetchFullProject(id);
+    if (!cloud) {
+      if (!cached) return false;
+    } else {
+      const loaded: Project = {
+        ...cloud,
+        invoices: cloud.invoices.map((inv: any) => ({
+          ...inv,
+          status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status,
+        })),
+      };
+      setProject(loaded);
+      cacheWrite(loaded);
+      pruneExpiredFilesForProject(id).catch(() => {});
+    }
 
-    const loaded: Project = JSON.parse(data);
-    loaded.invoices = loaded.invoices.map((inv: any) => ({
-      ...inv,
-      status: inv.status === 'PROCESSING' ? 'PENDING' : inv.status,
-      file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }),
-      previewUrl: '',
-    }));
-    setProject(loaded);
-
-    // Async rehydrate images from IndexedDB
-    const updated = await Promise.all(loaded.invoices.map(async (inv: any) => {
+    // 3. Async rehydrate images from IndexedDB
+    const base = cloud ?? cached!;
+    const updated = await Promise.all(base.invoices.map(async (inv: any) => {
       try {
         const dbFile = await fileStorageService.getFile(inv.id);
         if (dbFile) return { ...inv, file: dbFile, previewUrl: URL.createObjectURL(dbFile) };
@@ -165,8 +210,13 @@ export function useProject(userId?: string) {
         logger.error('FILE', `IndexedDB Load Failed for ${inv.id}`, err);
         onError?.(inv.id, err);
       }
-      return { ...inv, file: new File([], inv.file.name || 'unknown', { type: inv.file.type || 'image/jpeg' }), previewUrl: '' };
+      return {
+        ...inv,
+        file: new File([], inv.file?.name || 'unknown', { type: inv.file?.type || 'image/jpeg' }),
+        previewUrl: '',
+      };
     }));
+
     setProject(prev => prev ? { ...prev, invoices: updated } : null);
     return true;
   }, [userId]);
@@ -174,7 +224,7 @@ export function useProject(userId?: string) {
   const updateProjectMeta = useCallback((id: string, name: string, year: number, month: number) => {
     setProjectList(prev => {
       const updated = prev.map(p => p.id === id ? { ...p, name, year, month } : p);
-      localStorage.setItem('project_list', JSON.stringify(updated));
+      cacheWriteList(updated);
       return updated;
     });
     setProject(prev => {
@@ -186,18 +236,14 @@ export function useProject(userId?: string) {
   }, [saveSnapshot]);
 
   const deleteProject = useCallback((id: string) => {
-    localStorage.removeItem(`project_${id}`);
+    try { localStorage.removeItem(`project_${id}`); } catch { /* best-effort */ }
     setProjectList(prev => {
       const updated = prev.filter(p => p.id !== id);
-      localStorage.setItem('project_list', JSON.stringify(updated));
+      cacheWriteList(updated);
       return updated;
     });
-    if (userId) {
-      deleteCloudProject(userId, id).catch(e =>
-        console.warn('[Cloud] deleteProject failed:', e)
-      );
-    }
-  }, [userId]);
+    cloudDeleteProject(id);
+  }, []);
 
   const updateInvoices = useCallback((updater: (prev: InvoiceEntry[]) => InvoiceEntry[]) => {
     setProject(prev => prev ? { ...prev, invoices: updater(prev.invoices) } : null);
@@ -225,32 +271,12 @@ export function useProject(userId?: string) {
     });
   }, []);
 
-  // Upload invoice file to Supabase Storage in the background
-  const syncFileToCloud = useCallback(async (projectId: string, invoiceId: string, file: File) => {
-    if (!userId) return;
-    try {
-      const storagePath = await uploadInvoiceFile(userId, projectId, invoiceId, file);
-      if (storagePath) {
-        setProject(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            invoices: prev.invoices.map(inv =>
-              inv.id === invoiceId ? { ...inv, storagePath } : inv
-            ),
-          };
-        });
-      }
-    } catch (e) {
-      console.warn('[Cloud] syncFileToCloud failed:', e);
-    }
-  }, [userId]);
-
   return {
     projectList,
     project,
     setProject,
     saveSnapshot,
+    forceSave,
     createProject,
     loadProject,
     deleteProject,
@@ -258,6 +284,5 @@ export function useProject(userId?: string) {
     updateERP,
     toggleErpFlag,
     updateProjectMeta,
-    syncFileToCloud,
   };
 }

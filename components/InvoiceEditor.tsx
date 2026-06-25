@@ -9,7 +9,8 @@ import InvoicePreview from './InvoicePreview';
 import InvoiceForm from './InvoiceForm';
 import { upsertSeller } from '../services/supabaseService';
 
-// Configure PDF worker
+// Override react-pdf's hardcoded relative 'pdf.worker.mjs' with Vite-resolved asset URL.
+// react-pdf sets a wrong default that causes 404 → fake worker → PDF load failure.
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,

@@ -14,7 +14,9 @@ export function validateInvoice(item: InvoiceData): ValidationFailure[] {
   const failures: ValidationFailure[] = [];
 
   // Rule 1 & 2: invoice_number format + length
-  if (item.invoice_number && !item.invoice_number.startsWith('INV-') && !item.invoice_number.includes('-')) {
+  // T500（交通票券/二聯收銀）、TXXX（收據）、T400（海關）的號碼格式不是 2L+8D，跳過此規則
+  const skipInvNoValidation = ['T500', 'TXXX', 'T400'].includes((item.tax_code || '').toUpperCase());
+  if (!skipInvNoValidation && item.invoice_number && !item.invoice_number.startsWith('INV-') && !item.invoice_number.includes('-')) {
     const cleanInv = item.invoice_number.replace(/[^A-Z0-9]/g, '');
     const guiRegex = /^[A-Z]{2}\d{8}$/;
     if (!guiRegex.test(cleanInv)) {

@@ -65,7 +65,9 @@ export interface InvoiceEntry {
   status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'ERROR';
   data: InvoiceData[];
   error?: string;
-  storagePath?: string; // Supabase Storage path (when cloud-synced)
+  storagePath?: string;     // Supabase Storage path, null if not yet uploaded
+  uploadedAt?: string;      // ISO timestamp when file was uploaded (60-day countdown)
+  fileDeletedAt?: string;   // ISO timestamp when file was auto-deleted (null if still exists)
 }
 
 export interface ExpectedERP {
@@ -131,7 +133,7 @@ export interface AuditRow {
   files: InvoiceEntry[];
   file: InvoiceEntry | null; // Primary file
   ocr: InvoiceData | null;   // Flattened/Summary OCR data
-  auditStatus: 'MATCH' | 'MISMATCH' | 'MISSING_FILE' | 'EXTRA_FILE';
+  auditStatus: 'MATCH' | 'MISMATCH' | 'MISSING_FILE' | 'EXTRA_FILE' | 'SKIPPED' | 'NEEDS_REVIEW';
   diffDetails: string[];
   initialInvoiceIndex: number;
 }

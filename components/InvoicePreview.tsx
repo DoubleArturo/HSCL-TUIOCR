@@ -136,6 +136,7 @@ const InvoicePreview: React.FC<Props> = ({ currentEntry, entries, currentIndex, 
                                 <Document
                                     file={currentEntry.previewUrl}
                                     onLoadSuccess={onDocumentLoadSuccess}
+                                    onLoadError={(err) => console.error('[PDF Preview] load error:', err)}
                                     className="bg-white"
                                     loading={<div className="text-gray-500 font-bold p-10">載入 PDF 中...</div>}
                                     error={<div className="text-rose-500 font-bold p-10">PDF 載入失敗</div>}

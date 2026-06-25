@@ -1,7 +1,7 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
-import { createClient } from '@supabase/supabase-js';
 import { InvoiceData, ExpectedERP } from "../types";
 import { responseSchema } from './geminiSchema';
+import { getSupabase } from './supabaseClient';
 import { buildPromptText, buildSystemPrompt } from './promptBuilder';
 import { mergeSellerDB, postProcessItems, deduplicateResults, UsageData } from './invoicePostProcessor';
 
@@ -60,10 +60,7 @@ async function callGeminiApi(
   }
 
   // Production: proxy via Supabase Edge Function
-  const supabase = createClient(
-    import.meta.env.VITE_SUPABASE_URL,
-    import.meta.env.VITE_SUPABASE_ANON_KEY
-  );
+  const supabase = getSupabase();
   const { data, error } = await supabase.functions.invoke('gemini-ocr-proxy', {
     body: { model: effectiveModel, mimeType, base64Data: cleanBase64, promptText, systemPrompt, responseSchema },
   });
@@ -149,7 +146,7 @@ export const analyzeInvoice = async (
       if (validInvoices.length > 0) {
         const ocrTotalSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_total || 0), 0);
         const ocrSalesSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_sales || 0), 0);
-        const ocrTaxSum = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax || 0), 0);
+        const ocrTaxSum  = validInvoices.reduce((sum, inv) => sum + (inv.amount_tax  || 0), 0);
 
         const mismatchLogs: string[] = [];
         if (expectedERP.amount_total !== undefined && expectedERP.amount_total !== 0 && Math.abs(ocrTotalSum - expectedERP.amount_total) > 1)
@@ -159,8 +156,38 @@ export const analyzeInvoice = async (
         if (expectedERP.amount_tax !== undefined && expectedERP.amount_tax !== 0 && Math.abs(ocrTaxSum - expectedERP.amount_tax) > 1)
           mismatchLogs.push(`Tax mismatch (OCR: ${ocrTaxSum}, ERP: ${expectedERP.amount_tax})`);
 
+        // 多張發票憑證：OCR 取出數量少於 ERP 期望數量，也觸發 Pro 升級
+        const countMismatch =
+          expectedERP.invoice_numbers &&
+          expectedERP.invoice_numbers.length > 1 &&
+          validInvoices.filter(r => r.invoice_number).length < expectedERP.invoice_numbers.length;
+
+        if (countMismatch) {
+          mismatchLogs.push(
+            `Count mismatch: ERP expects ${expectedERP.invoice_numbers!.length} invoices, OCR found ${validInvoices.filter(r => r.invoice_number).length}`,
+          );
+        }
+
         if (mismatchLogs.length > 0) {
           console.log(`[Validation Retry] ERP mismatch detected: ${mismatchLogs.join(', ')}. Attempt ${validationRetryCount + 1}/1 with gemini-2.5-pro...`);
+
+          // Pro ROI guard: if Flash result is already reliable, ERP amount is likely wrong — skip Pro.
+          const flashIsReliable = validInvoices.every(
+            inv =>
+              inv.verification.ai_confidence >= 85 &&
+              Math.abs((inv.amount_sales + inv.amount_tax) - inv.amount_total) <= 1 &&
+              !!inv.invoice_number,
+          );
+          if (flashIsReliable) {
+            console.log(`[Pro Guard] Flash result is reliable — ERP amount likely wrong, skipping Pro`);
+            results.forEach(r => {
+              if (!r.verification.flagged_fields.includes('erp_amount_suspicious')) {
+                r.verification.flagged_fields.push('erp_amount_suspicious');
+              }
+            });
+            return results;
+          }
+
           const retryResults = await analyzeInvoice(base64Data, mimeType, 'gemini-2.5-pro', retryCount, knownSellers, expectedERP, validationRetryCount + 1);
           return retryResults.map(item => ({
             ...item,

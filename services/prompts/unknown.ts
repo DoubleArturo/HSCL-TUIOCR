@@ -18,10 +18,24 @@ export function buildUnknownTypePrompt(
 ): string {
   const sections: string[] = [];
 
+  // 段落 0：快速視覺分類樹（讓 LLM 在進入未知處理前先嘗試對號入座）
+  sections.push(
+    `## STEP 1 — QUICK TYPE CLASSIFICATION
+Before extracting, identify the document type by visual fingerprint:
+
+→ Text "電子發票證明聯" + QR codes present → **T301** 三聯電子, voucher_type="三聯電子"
+→ Text "收銀機統一發票" + A4 size + "扣抵聯" OR "買受人存根聯" → **T302** 三聯收銀, voucher_type="三聯收銀"
+→ Text "收銀機統一發票" + narrow thermal strip (~7cm wide) + NO "扣抵聯" → **T500** 二聯收銀, voucher_type="二聯收銀"
+→ Handwritten ink amounts + "買受人統一編號" field + NO "收銀機" text → **T300** 三聯手寫, voucher_type="三聯手寫"
+→ Transit ticket: 高鐵/台鐵/客運/捷運 ticket → **T500** 交通票券, voucher_type="交通票券"
+→ Customs / 進口報單 / 海關文件 → **T400**, tax_code="T400", error_code="NOT_INVOICE"
+→ Foreign-language Invoice without a Taiwan 2L+8D invoice number → **TXXX**, error_code="NOT_INVOICE"
+→ None of the above match → proceed to unknown handling below`,
+  );
+
   // 段落 1：未知類型處理總指示
   sections.push(
-    `### UNKNOWN DOCUMENT TYPE HANDLING
-You are processing a document that does not match standard Taiwan GUI invoice categories.
+    `## STEP 2 — UNKNOWN DOCUMENT TYPE HANDLING (only if no match above)
 Your task is to:
 1. Identify what this document IS (its function/purpose in a business transaction)
 2. Extract all financial data that is visibly printed

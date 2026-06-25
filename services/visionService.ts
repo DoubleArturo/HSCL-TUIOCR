@@ -1,5 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
+let _supabase: ReturnType<typeof createClient> | null = null;
+function getSupabaseClient() {
+  if (!_supabase) _supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+  return _supabase;
+}
+
 export interface VisionOCRResult {
     text: string;
     confidence: number;
@@ -40,10 +46,7 @@ export const extractTextFromImage = async (
         }
         data = await response.json();
     } else {
-        const supabase = createClient(
-            import.meta.env.VITE_SUPABASE_URL,
-            import.meta.env.VITE_SUPABASE_ANON_KEY,
-        );
+        const supabase = getSupabaseClient();
         const { data: proxyData, error } = await supabase.functions.invoke('vision-ocr-proxy', {
             body: { base64Data, mimeType },
         });

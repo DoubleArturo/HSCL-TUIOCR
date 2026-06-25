@@ -383,6 +383,66 @@ describe('computeAuditRows - TXXX skipping', () => {
     expect(rows[0].diffDetails).toHaveLength(0);
   });
 
+  it('TXXX ERP row must not show another invoice\'s OCR data as display (G12-Q50026 pattern)', () => {
+    // In a voucher with two ERP rows (T301 + TXXX receipt), TXXX row's display
+    // must not steal the T301 invoice's OCR data. ocr should be null.
+    const t301OCR = makeOCR({
+      invoice_number: 'YL06030291',
+      tax_code: 'T301',
+      amount_total: 516,
+      seller_tax_id: '06030291',
+    });
+    const entry: InvoiceEntry = {
+      id: 'G12-Q50026',
+      file: new File([], 'G12-Q50026.pdf') as any,
+      previewUrl: '',
+      status: 'SUCCESS',
+      data: [t301OCR],
+    };
+    const erpT301 = makeERP({
+      voucher_id: 'G12-Q50026',
+      tax_code: 'T301',
+      invoice_numbers: ['YL06030291'],
+      amount_total: 516,
+    });
+    const erpTXXX = makeERP({
+      voucher_id: 'G12-Q50026',
+      tax_code: 'TXXX',
+      invoice_numbers: [],
+      amount_total: 53,
+    });
+
+    const rows = computeAuditRows([erpT301, erpTXXX], [entry]);
+    const txxxRow = rows.find(r => r.erp?.tax_code === 'TXXX');
+
+    expect(txxxRow?.auditStatus).toBe('SKIPPED');
+    expect(txxxRow?.ocr).toBeNull();
+  });
+
+  it('unmatched ERP row must not display another row\'s already-claimed OCR (G61-Q50027 pattern)', () => {
+    // Row 1 claims XV44523109. Row 2 has XV44523110 (not in OCR).
+    // Row 2's displayOCR must NOT show XV44523109's data.
+    const ocr1 = makeOCR({ invoice_number: 'XV44523109', amount_total: 211034, seller_tax_id: '44523109' });
+    const ocr3 = makeOCR({ invoice_number: 'ZX44455900', amount_total: 114560, seller_tax_id: '44455900' });
+    const entry: InvoiceEntry = {
+      id: 'G61-Q50027',
+      file: new File([], 'G61-Q50027.pdf') as any,
+      previewUrl: '',
+      status: 'SUCCESS',
+      data: [ocr1, ocr3],
+    };
+    const erp1 = makeERP({ voucher_id: 'G61-Q50027', invoice_numbers: ['XV44523109'], amount_total: 211034 });
+    const erp2 = makeERP({ voucher_id: 'G61-Q50027', invoice_numbers: ['XV44523110'], amount_total: 21394 });
+    const erp3 = makeERP({ voucher_id: 'G61-Q50027', invoice_numbers: ['ZX44455900'], amount_total: 114560 });
+
+    const rows = computeAuditRows([erp1, erp2, erp3], [entry]);
+    const row2 = rows.find(r => r.erp?.invoice_numbers?.includes('XV44523110'));
+
+    expect(row2?.auditStatus).toBe('MISMATCH');
+    // displayOCR must NOT be XV44523109 (already claimed by row 1)
+    expect(row2?.ocr?.invoice_number).not.toBe('XV44523109');
+  });
+
   it('OCR with tax_code=TXXX should be skipped from audit diffs', () => {
     const txxx = makeOCR({ tax_code: 'TXXX', seller_tax_id: '99999999' });
     const rows = computeAuditRows(
@@ -392,5 +452,153 @@ describe('computeAuditRows - TXXX skipping', () => {
     // Invoice numbers match, but tax_id differs
     // However, TXXX OCR should be skipped from tax_id diff
     expect(rows[0].diffDetails).not.toContain('tax_id');
+  });
+});
+
+// T400 海關進口：直接 SKIPPED，不進行 OCR 比對
+describe('computeAuditRows - T400 skip', () => {
+  it('ERP with tax_code=T400 is SKIPPED regardless of uploaded file', () => {
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T400', amount_total: 50000 })],
+      [makeEntry('G11-Q10001', makeOCR({ tax_code: 'T400', amount_total: 99999 }))]
+    );
+    expect(rows[0].auditStatus).toBe('SKIPPED');
+    expect(rows[0].diffDetails).toHaveLength(0);
+  });
+
+  it('ERP with tax_code=T400 is SKIPPED even when no file uploaded', () => {
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T400', amount_total: 50000 })],
+      [] // no file
+    );
+    expect(rows[0].auditStatus).toBe('SKIPPED');
+  });
+});
+
+// T500 交通票券：ERP 存內部序號，票面印條碼，不做 invoice number 比對
+describe('computeAuditRows - T500 invoice number format mismatch', () => {
+  it('T500 ERP row matches OCR even when invoice numbers differ in format (date-ID vs barcode)', () => {
+    // Real-world case: ERP stores 2026042901, ticket has barcode 2903201198093
+    const ticket = makeOCR({
+      tax_code: 'T500',
+      voucher_type: '交通票券',
+      invoice_number: '2903201198093',
+      amount_total: 540,
+      amount_sales: 514,
+      amount_tax: 26,
+    });
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T500', amount_total: 540, invoice_numbers: ['2026042901'] })],
+      [makeEntry('G11-Q10001', ticket)]
+    );
+    // Should NOT report inv_no mismatch — T500 skips invoice number comparison
+    expect(rows[0].diffDetails).not.toContain('inv_no');
+  });
+
+  it('T500: multiple ERP rows with date-IDs each claim their own OCR ticket', () => {
+    // Real-world: G12-Q50024 has 2 T500 ERP rows (2026042901, 2026042902)
+    // with 2 OCR tickets having barcode numbers
+    const ticket1 = makeOCR({
+      tax_code: 'T500',
+      voucher_type: '交通票券',
+      invoice_number: '2903201198093',
+      amount_total: 540,
+    });
+    const ticket2 = makeOCR({
+      tax_code: 'T500',
+      voucher_type: '交通票券',
+      invoice_number: '2903201198094',
+      amount_total: 540,
+    });
+    const entry: InvoiceEntry = {
+      id: 'G12-Q50024',
+      file: new File([], 'G12-Q50024.pdf') as any,
+      previewUrl: '',
+      status: 'SUCCESS',
+      data: [ticket1, ticket2],
+    };
+    const erp1 = makeERP({ voucher_id: 'G12-Q50024', tax_code: 'T500', invoice_numbers: ['2026042901'], amount_total: 540 });
+    const erp2 = makeERP({ voucher_id: 'G12-Q50024', tax_code: 'T500', invoice_numbers: ['2026042902'], amount_total: 540 });
+
+    const rows = computeAuditRows([erp1, erp2], [entry]);
+    // Each row claims its own OCR ticket; neither should report inv_no mismatch
+    expect(rows[0].diffDetails).not.toContain('inv_no');
+    expect(rows[1].diffDetails).not.toContain('inv_no');
+    // No double-claiming: the two tickets are claimed separately
+    const matchedNos = rows.map(r => r.invoiceNumbers ?? []).flat();
+    expect(new Set(matchedNos).size).toBe(matchedNos.length);
+  });
+});
+
+// 修2：1 碼模糊比對
+describe('computeAuditRows - 修2: 1碼模糊比對', () => {
+  it('OCR 號碼與 ERP 相差 1 碼（Y→V）仍視為 MATCH', () => {
+    // 真實案例：ERP=ZY14230504，OCR=ZV14230504（Y誤讀為V）
+    const rows = computeAuditRows(
+      [makeERP({ invoice_numbers: ['ZY14230504'] })],
+      [makeEntry('G11-Q10001', makeOCR({ invoice_number: 'ZV14230504' }))]
+    );
+    expect(rows[0].auditStatus).toBe('MATCH');
+    expect(rows[0].diffDetails).not.toContain('inv_no');
+  });
+
+  it('OCR 號碼相差 2 碼 → 仍報 inv_no diff（不過度容錯）', () => {
+    const rows = computeAuditRows(
+      [makeERP({ invoice_numbers: ['AB12345678'] })],
+      [makeEntry('G11-Q10001', makeOCR({ invoice_number: 'CD12345678' }))] // 2碼差
+    );
+    expect(rows[0].diffDetails).toContain('inv_no');
+  });
+
+  it('ERP 號碼是 OCR 的子串（完整包含）→ 仍匹配', () => {
+    const rows = computeAuditRows(
+      [makeERP({ invoice_numbers: ['AB12345678'] })],
+      [makeEntry('G11-Q10001', makeOCR({ invoice_number: 'AB12345678' }))]
+    );
+    expect(rows[0].auditStatus).toBe('MATCH');
+  });
+});
+
+// 修3：T300 統編降級
+describe('computeAuditRows - 修3: T300 統編不符降為 NEEDS_REVIEW', () => {
+  it('T300 統編不符 → NEEDS_REVIEW（不是紅燈 MISMATCH）', () => {
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T300', seller_tax_id: '12345670' })],
+      [makeEntry('G11-Q10001', makeOCR({ tax_code: 'T300', seller_tax_id: '12345671' }))]
+    );
+    expect(rows[0].auditStatus).toBe('NEEDS_REVIEW');
+    expect(rows[0].diffDetails).toContain('tax_id_unclear');
+    expect(rows[0].diffDetails).not.toContain('tax_id');
+  });
+
+  it('T302 統編不符 → MISMATCH（三聯收銀應精準）', () => {
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T302', seller_tax_id: '12345670' })],
+      [makeEntry('G11-Q10001', makeOCR({ tax_code: 'T302', seller_tax_id: '99999999' }))]
+    );
+    expect(rows[0].auditStatus).toBe('MISMATCH');
+    expect(rows[0].diffDetails).toContain('tax_id');
+  });
+});
+
+// 修4：NEEDS_REVIEW vs MISMATCH 分級
+describe('computeAuditRows - 修4: NEEDS_REVIEW status', () => {
+  it('T300 統編不符（唯一差異）→ NEEDS_REVIEW（非 MISMATCH）', () => {
+    // T300 手寫：統編不符 → 降為 tax_id_unclear → 只有軟警告 → NEEDS_REVIEW
+    const rows = computeAuditRows(
+      [makeERP({ tax_code: 'T300', invoice_numbers: ['AB12345678'], seller_tax_id: '12345670' })],
+      [makeEntry('G11-Q10001', makeOCR({ tax_code: 'T300', invoice_number: 'AB12345678', seller_tax_id: '12345671' }))]
+    );
+    expect(rows[0].auditStatus).toBe('NEEDS_REVIEW');
+    expect(rows[0].diffDetails).toContain('tax_id_unclear');
+  });
+
+  it('有硬差異（金額）+ 統編模糊 → 仍是 MISMATCH', () => {
+    const rows = computeAuditRows(
+      [makeERP({ amount_total: 1050, seller_tax_id: '12345670' })],
+      [makeEntry('G11-Q10001', makeOCR({ amount_total: 500, seller_tax_id: '1654?744' }))]
+    );
+    expect(rows[0].auditStatus).toBe('MISMATCH');
+    expect(rows[0].diffDetails).toContain('amount');
   });
 });

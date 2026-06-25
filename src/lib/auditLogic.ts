@@ -8,6 +8,22 @@ function normInvNo(s: string | null | undefined): string {
   return (s || '').replace(/[\s-]/g, '').toUpperCase();
 }
 
+// 修2：1 碼誤讀容差
+// 台灣統一發票號碼是固定 10 碼（2L+8D），OCR 誤讀 1 碼非常常見（Y→V, O→0 等）。
+// 相同長度、Levenshtein 距離 = 1 → 視為匹配。
+function levenshtein1(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diffs = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i] && ++diffs > 1) return false;
+  }
+  return diffs === 1;
+}
+
+function invNoMatch(ocrNo: string, erpNo: string): boolean {
+  return ocrNo === erpNo || ocrNo.includes(erpNo) || erpNo.includes(ocrNo) || levenshtein1(ocrNo, erpNo);
+}
+
 function isInvoiceDoc(inv: InvoiceData): boolean {
   return inv.document_type !== '非發票' && inv.error_code !== 'NOT_INVOICE';
 }
@@ -88,30 +104,60 @@ export function computeAuditRows(
 
       let matchedOCRInvoices: InvoiceData[] = [];
 
-      // Skip audit for ERP rows that are TXXX (miscellaneous/non-billable items)
+      // Skip audit for ERP rows that are TXXX or T400 (海關進口：存檔即可，不比對 OCR 數值)
       const erpTaxCode = (erp.tax_code || '').toUpperCase();
-      if (erpTaxCode === 'TXXX') {
+      if (erpTaxCode === 'TXXX' || erpTaxCode === 'T400') {
         auditStatus = 'SKIPPED';
       } else if (matchingFiles.length === 0) {
         auditStatus = 'MISSING_FILE';
       } else if (allOCRInvoices.length > 0) {
         const erpInvNos = erp.invoice_numbers.map(normInvNo);
 
-        // Fix 2: only match OCR invoices not already claimed by a prior row in this group
-        matchedOCRInvoices = allOCRInvoices.filter(inv => {
-          const ocrNo = normInvNo(inv.invoice_number);
-          if (!ocrNo) return false;
-          if (!isInvoiceDoc(inv)) return false;
-          if (claimedOCRInvNos.has(ocrNo)) return false;
-          return erpInvNos.some(n => ocrNo.includes(n) || n.includes(ocrNo));
-        });
+        if (erpTaxCode === 'T500') {
+          // T500 交通票券/二聯收銀: ERP 存的是內部序號（YYYYMMDDNN），票面印的是實際條碼。
+          // 兩者格式本質不同，不做 invoice number 比對。
+          // 每個 ERP row 只取 1 張未被 claim 的 T500 OCR 結果（依序配對）。
+          const firstUnclaimed = allOCRInvoices.find(inv => {
+            if (!isInvoiceDoc(inv)) return false;
+            if (inv.tax_code !== 'T500') return false;
+            const ocrNo = normInvNo(inv.invoice_number);
+            return !claimedOCRInvNos.has(ocrNo || '\x00');
+          });
+          if (firstUnclaimed) matchedOCRInvoices = [firstUnclaimed];
+        } else {
+          // Fix 2: only match OCR invoices not already claimed by a prior row in this group
+          // 修2 修正：Levenshtein 只作 fallback，不作主要過濾器。
+          // 主要過濾：exact / substring（精確）。
+          // 這樣 XW10376254 不會誤配到 XW10376255（連續發票號碼差 1 碼是合法的不同發票）。
+          const exactMatch = (ocrNo: string, erpNo: string) =>
+            ocrNo === erpNo || ocrNo.includes(erpNo) || erpNo.includes(ocrNo);
+
+          matchedOCRInvoices = allOCRInvoices.filter(inv => {
+            const ocrNo = normInvNo(inv.invoice_number);
+            if (!ocrNo) return false;
+            if (!isInvoiceDoc(inv)) return false;
+            if (claimedOCRInvNos.has(ocrNo)) return false;
+            return erpInvNos.some(n => exactMatch(ocrNo, n));
+          });
+
+          // Levenshtein fallback：只有完全找不到 exact match，且 ERP 只有 1 個發票號碼時，
+          // 才用模糊比對（用於 Y→V、O→D 等 OCR 字型混淆，不適用連續號碼）。
+          if (matchedOCRInvoices.length === 0 && erpInvNos.length === 1) {
+            const fuzzy = allOCRInvoices.find(inv => {
+              const ocrNo = normInvNo(inv.invoice_number);
+              return ocrNo && isInvoiceDoc(inv) && !claimedOCRInvNos.has(ocrNo) &&
+                levenshtein1(ocrNo, erpInvNos[0]);
+            });
+            if (fuzzy) matchedOCRInvoices = [fuzzy];
+          }
+        }
 
         // Fallback: blank OCR invoice number, single ERP inv_no, single unclaimed valid OCR
         const validOCR = allOCRInvoices.filter(inv =>
           isCountableForAmount(inv) && !claimedOCRInvNos.has(normInvNo(inv.invoice_number) || ''),
         );
         const hasReadableOCRInvNo = validOCR.some(inv => normInvNo(inv.invoice_number));
-        if (matchedOCRInvoices.length === 0 && erpInvNos.length === 1 && validOCR.length === 1 && !hasReadableOCRInvNo) {
+        if (matchedOCRInvoices.length === 0 && erpTaxCode !== 'T500' && erpInvNos.length === 1 && validOCR.length === 1 && !hasReadableOCRInvNo) {
           matchedOCRInvoices = [validOCR[0]];
         }
 
@@ -142,7 +188,6 @@ export function computeAuditRows(
         }
 
         // 3. Tax code
-        const erpTaxCode = (erp.tax_code || '').toUpperCase();
         const ocrTaxCode = (matchedOCRInvoices[0]?.tax_code || '').toUpperCase();
         if (erpTaxCode && ocrTaxCode && erpTaxCode !== ocrTaxCode && matchedOCRInvoices.length > 0) {
           diffDetails.push('tax_code');
@@ -154,12 +199,19 @@ export function computeAuditRows(
         }
 
         // 5. Seller tax ID
+        // 修3：T300（三聯手寫）統編降級
+        // 手寫發票的賣方統編受格線/印章遮擋，OCR 誤讀機率高且難以修正。
+        // 即使 ERP vs OCR 統編不符，視為「需確認」而非「確定錯誤」。
         const erpTaxId = erp.seller_tax_id || '';
+        const erpIsHandwritten = erpTaxCode === 'T300';
         matchedOCRInvoices.forEach(inv => {
           if (shouldSkipFromAudit(inv)) return;
           const ocrTaxId = inv.seller_tax_id || '';
-          if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId && !diffDetails.includes('tax_id')) {
-            diffDetails.push('tax_id');
+          if (ocrTaxId && erpTaxId && ocrTaxId !== erpTaxId) {
+            if (!diffDetails.includes('tax_id') && !diffDetails.includes('tax_id_unclear')) {
+              // T300 手寫：統編不符降為 unclear（警告），不直接算硬 MISMATCH
+              diffDetails.push(erpIsHandwritten ? 'tax_id_unclear' : 'tax_id');
+            }
           }
           if (ocrTaxId.includes('?') && !diffDetails.includes('tax_id_unclear')) {
             diffDetails.push('tax_id_unclear');
@@ -181,7 +233,6 @@ export function computeAuditRows(
               }
             }
             // Tax code diff against fallback
-            const erpTaxCode = (erp.tax_code || '').toUpperCase();
             const fallbackTaxCode = (fallback.tax_code || '').toUpperCase();
             if (erpTaxCode && fallbackTaxCode && erpTaxCode !== fallbackTaxCode) {
               diffDetails.push('tax_code');
@@ -199,7 +250,14 @@ export function computeAuditRows(
           }
         }
 
-        if (diffDetails.length > 0) auditStatus = 'MISMATCH';
+        if (diffDetails.length > 0) {
+          // 修4：NEEDS_REVIEW vs MISMATCH 分級
+          // 只有「軟警告」（統編模糊）→ NEEDS_REVIEW（黃色，需人工確認但不算紅燈）
+          // 有任何硬差異（金額/發票號碼/稅別/日期） → MISMATCH（紅燈）
+          const SOFT_ONLY_DIFFS = new Set<string>(['tax_id_unclear']);
+          const hasHardDiff = diffDetails.some(d => !SOFT_ONLY_DIFFS.has(d));
+          auditStatus = hasHardDiff ? 'MISMATCH' : 'NEEDS_REVIEW';
+        }
       } else {
         auditStatus = 'MISMATCH';
         diffDetails.push('no_match_found');
@@ -219,9 +277,13 @@ export function computeAuditRows(
           amount_tax: valid.reduce((s, i) => s + (i.amount_tax || 0), 0),
           invoice_number: invoiceNumbers,
         };
-      } else if (allOCRInvoices.length > 0) {
-        const fallback = allOCRInvoices.find(i => isInvoiceDoc(i)) || allOCRInvoices[0];
-        displayOCR = { ...fallback };
+      } else if (allOCRInvoices.length > 0 && auditStatus !== 'SKIPPED') {
+        // Don't show invoices already claimed by other rows in this group.
+        // SKIPPED rows (TXXX/T400) must never show another invoice's data as displayOCR.
+        const fallback = allOCRInvoices.find(
+          i => isInvoiceDoc(i) && !claimedOCRInvNos.has(normInvNo(i.invoice_number) || '')
+        ) ?? null;
+        if (fallback) displayOCR = { ...fallback };
       }
 
       let primaryFile = matchingFiles[0] || null;
