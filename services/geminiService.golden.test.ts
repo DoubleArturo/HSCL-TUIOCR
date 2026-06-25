@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deduplicateResults } from './geminiService';
+import { deduplicateResults } from './invoicePostProcessor';
 import type { InvoiceData } from '../types';
 
 function makeResult(overrides: Partial<InvoiceData> = {}): InvoiceData {
