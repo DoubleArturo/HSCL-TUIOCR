@@ -52,8 +52,8 @@ function cacheReadList(): ProjectMeta[] {
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
-export function useProject() {
-  const [projectList, setProjectList] = useState<ProjectMeta[]>(() => cacheReadList());
+export function useProject(userId?: string) {
+  const [projectList, setProjectList] = useState<ProjectMeta[]>([]);
   const [project, setProject] = useState<Project | null>(null);
 
   const isDirtyRef = useRef(false);
@@ -64,13 +64,19 @@ export function useProject() {
     if (project) isDirtyRef.current = true;
   }, [project]);
 
-  // Startup: load list from Supabase (cache shown instantly while fetching)
+  // Re-fetch project list whenever the logged-in user changes.
+  // Clearing projectList immediately prevents showing a previous user's stale cache.
   useEffect(() => {
+    setProjectList([]);
+    setProject(null);
+    if (!userId) return;
+
+    const cached = cacheReadList();
+    if (cached.length > 0) setProjectList(cached);
+
     fetchProjectList().then(list => {
-      if (list.length > 0) {
-        setProjectList(list);
-        cacheWriteList(list);
-      }
+      setProjectList(list);
+      cacheWriteList(list);
     });
 
     // Auto-save dirty state every 10s
@@ -94,7 +100,7 @@ export function useProject() {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [userId]);
 
   // ─── Cloud sync ────────────────────────────────────────────────────────────
 

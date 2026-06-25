@@ -66,7 +66,7 @@ const App: React.FC = () => {
         setProject,
         saveSnapshot,
         forceSave,
-    } = useProject();
+    } = useProject(currentUser?.id);
 
     const [selectedKey, setSelectedKey] = useState<string | null>(null);
     const [hasCustomKey, setHasCustomKey] = useState(false);

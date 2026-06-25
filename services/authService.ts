@@ -35,7 +35,10 @@ export function getSession(): AppUser | null {
 
 export async function clearSession(): Promise<void> {
   _cached = null;
-  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('project_list');
+  } catch { /* ignore */ }
   await getSupabase().auth.signOut();
 }
 
